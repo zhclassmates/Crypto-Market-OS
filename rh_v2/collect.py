@@ -72,11 +72,19 @@ def snapshot(con, now):
     return len(addrs), len(data), obs
 
 
-def deep_dive(con, now, obs):
-    """只对观察池：Blockscout 持币数（每小时）、Top10（每 6 小时）、GT 独立买家数（每小时）。"""
+def deep_dive(con, now, obs, deadline=None):
+    """只对观察池：Blockscout 持币数（每小时）、Top10（每 6 小时）、GT 独立买家数（每小时）。
+    deadline：绝对时间戳，到点后剩余币跳过。返回跳过的币数。"""
     flows = S.gt_pool_flows([p for _, p in obs])
     do_top10 = (now // 3600) % 6 == 0
-    for addr, pool in obs:
+    skipped_tokens = 0
+    for i, (addr, pool) in enumerate(obs, 1):
+        if deadline is not None and time.time() >= deadline:
+            skipped_tokens = len(obs) - i + 1
+            print(f"[{time.strftime('%H:%M:%S')}]    深挖到点，剩余 {skipped_tokens} 个币本轮跳过", flush=True)
+            break
+        if i == 1 or i % 10 == 0:
+            print(f"[{time.strftime('%H:%M:%S')}]    深挖进度 {i}/{len(obs)}", flush=True)
         upd = {}
         bt = S.bs_token(addr)
         if bt:
@@ -92,47 +100,116 @@ def deep_dive(con, now, obs):
             sets = ",".join(f"{k}=?" for k in upd)
             con.execute(f"UPDATE snapshots SET {sets} WHERE ts=? AND address=?", (*upd.values(), now, addr))
     con.commit()
+    return skipped_tokens
 
 
 def run_once(force_universe=False, force_listings=False):
     t0 = time.time()
     print(f"[{time.strftime('%H:%M:%S')}] 开始运行...", flush=True)
+    S.reset_stats()
     con = db.connect()
     now = hour_ts()
-    log = {"ts": now}
+    deadline = t0 + C.BUDGET_SECS
+    log = {"ts": now, "steps": {}, "skipped": []}
+
+    def left():
+        return deadline - time.time()
+
+    def skip(name, why=""):
+        log["skipped"].append(name + (f"({why})" if why else ""))
+        print(f"[{time.strftime('%H:%M:%S')}]    ⤼ 跳过 {name} {why}", flush=True)
+
+    def step_done(name, t):
+        secs = round(time.time() - t, 1)
+        log["steps"][name] = secs
+        print(f"[{time.strftime('%H:%M:%S')}]    ↳ {name} 用时 {secs}s", flush=True)
+
+    def checkpoint(phase):
+        chk = dict(log)
+        chk["phase"] = phase
+        chk["secs"] = round(time.time() - t0, 1)
+        db.meta_set(con, "last_run", chk)
+        con.commit()
+
     try:
+        t = time.time()
         print(f"[{time.strftime('%H:%M:%S')}] 1. 刷新宇宙...", flush=True)
         log["universe_new"] = refresh_universe(con, now, force_universe)
         print(f"[{time.strftime('%H:%M:%S')}]    新增 {log['universe_new']} 个代币", flush=True)
+        step_done("universe", t)
+
+        t = time.time()
         print(f"[{time.strftime('%H:%M:%S')}] 2. 拉取快照...", flush=True)
         log["queried"], log["got"], obs = snapshot(con, now)
         log["obs"] = len(obs)
         print(f"[{time.strftime('%H:%M:%S')}]    查询 {log['queried']}, 获得 {log['got']}, 观察池 {log['obs']}", flush=True)
-        print(f"[{time.strftime('%H:%M:%S')}] 3. 深挖观察池...", flush=True)
-        deep_dive(con, now, obs)
+        step_done("snapshot", t)
+        checkpoint("snapshot_done")     # 关键步骤已完成：即使后面被杀/超时也留痕
+
+        # ---- 以下均为非关键步骤，受总预算约束 ----
+        if left() > 30:
+            t = time.time()
+            print(f"[{time.strftime('%H:%M:%S')}] 3. 深挖观察池...", flush=True)
+            log["deep_skipped_tokens"] = deep_dive(con, now, obs, deadline=deadline)
+            step_done("deep_dive", t)
+        else:
+            log["deep_skipped_tokens"] = len(obs)
+            skip("deep_dive", "预算不足")
+
         last_l = int(db.meta_get(con, "listings_ts", 0))
-        if force_listings or now - last_l >= 86400:
+        if not (force_listings or now - last_l >= 86400):
+            pass
+        elif left() < 90:
+            skip("listings", "预算不足，下个每日窗口再刷")
+        else:
+            t = time.time()
             print(f"[{time.strftime('%H:%M:%S')}] 4. 刷新交易所列表...", flush=True)
-            res = LT.refresh_listings(con, now)
+            listings_deadline = min(deadline, time.time() + C.LISTINGS_BUDGET_SECS)
+            res = LT.refresh_listings(con, now, deadline=listings_deadline)
             log["listings"] = res
+            step_done("listings", t)
             if res.get("ok"):
                 db.meta_set(con, "listings_ts", now)
-        print(f"[{time.strftime('%H:%M:%S')}] 5. 计算频率表...", flush=True)
-        rates = LT.base_rates(con, now)
-        print(f"[{time.strftime('%H:%M:%S')}] 6. 评分和状态机...", flush=True)
-        prev_states = {r[0]: r[1] for r in con.execute("SELECT address, state FROM state")}
-        scored = scoring.score_all(con, now, LT.venues(con), rates)
-        con.commit()
-        log["states"] = {}
-        for s in scored:
-            log["states"][s["state"]] = log["states"].get(s["state"], 0) + 1
-        print(f"[{time.strftime('%H:%M:%S')}] 7. 生成看板...", flush=True)
-        dashboard.build(con, now, rates)
-        print(f"[{time.strftime('%H:%M:%S')}] 8. 发送告警...", flush=True)
-        dashboard.alert(con, now, prev_states, scored)
+
+        if left() <= 0:
+            skip("rates")
+            skip("scoring")
+            skip("dashboard")
+            skip("alert", "预算耗尽")
+        else:
+            t = time.time()
+            print(f"[{time.strftime('%H:%M:%S')}] 5. 计算频率表...", flush=True)
+            rates = LT.base_rates(con, now)
+            step_done("rates", t)
+
+            t = time.time()
+            print(f"[{time.strftime('%H:%M:%S')}] 6. 评分和状态机...", flush=True)
+            prev_states = {r[0]: r[1] for r in con.execute("SELECT address, state FROM state")}
+            scored = scoring.score_all(con, now, LT.venues(con), rates)
+            con.commit()
+            log["states"] = {}
+            for s in scored:
+                log["states"][s["state"]] = log["states"].get(s["state"], 0) + 1
+            step_done("scoring", t)
+
+            if left() <= 0:
+                skip("dashboard")
+                skip("alert", "预算耗尽")
+            else:
+                t = time.time()
+                print(f"[{time.strftime('%H:%M:%S')}] 7. 生成看板...", flush=True)
+                dashboard.build(con, now, rates)
+                step_done("dashboard", t)
+
+                t = time.time()
+                print(f"[{time.strftime('%H:%M:%S')}] 8. 发送告警...", flush=True)
+                dashboard.alert(con, now, prev_states, scored)
+                step_done("alert", t)
     except Exception:
         log["error"] = traceback.format_exc()
         print(f"[{time.strftime('%H:%M:%S')}] 错误: {log['error']}", flush=True)
+    log["phase"] = "done"
+    log["sources"] = S.snapshot_stats()
     log["secs"] = round(time.time() - t0, 1)
     db.meta_set(con, "last_run", log)
     con.commit()

@@ -6,14 +6,39 @@
   python3 run.py rates         打印 ListingP 频率表（Alpha→永续 7/30/90 天）
   python3 run.py status        看上一轮运行日志
 """
+import fcntl
 import json
+import os
 import sys
 import time
 
 import collect
+import config as C
 import db
 import listing_table as LT
 import sources as S
+
+
+def acquire_once_lock():
+    """上一轮还在跑就跳过本轮（launchd 不重叠执行）。返回锁住的文件句柄，进程结束自动释放。"""
+    f = open(C.LOCK_PATH, "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        f.close()
+        return None
+    f.write(str(os.getpid()))
+    f.flush()
+    return f
+
+
+def skip_because_locked():
+    con = db.connect()
+    log = {"ts": collect.hour_ts(), "phase": "skipped", "skipped": ["locked(上一轮未结束)"]}
+    db.meta_set(con, "last_run", log)
+    con.commit()
+    con.close()
+    print(f"[{time.strftime('%H:%M:%S')}] 上一轮还在跑，本轮跳过", flush=True)
 
 
 def backfill():
@@ -38,6 +63,10 @@ def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "once"
     force = "--force" in sys.argv
     if cmd == "once":
+        lock = acquire_once_lock()
+        if lock is None:
+            skip_because_locked()
+            return
         print(json.dumps(collect.run_once(force, force), ensure_ascii=False, indent=1, default=str))
     elif cmd == "loop":
         while True:

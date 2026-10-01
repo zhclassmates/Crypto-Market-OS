@@ -4,10 +4,40 @@ import time
 import urllib.request
 import urllib.error
 
-from config import RPS, CHAIN_DS, CHAIN_GT, BLOCKSCOUT, BLOCKSCOUT_KEY
+from config import (RPS, CHAIN_DS, CHAIN_GT, BLOCKSCOUT, BLOCKSCOUT_KEY,
+                    CIRCUIT_FAILS, HTTP_TIMEOUT, HTTP_TRIES)
 
 UA = {"User-Agent": "rhv2-collector/0.1", "Accept": "application/json"}
 _last = {}
+
+# 每个数据源本轮的请求统计（reset_stats 在每轮开始时清零）
+_STATS = {}
+# 熔断状态：{src: {"fails": 连续失败次数, "open": bool}}
+_CIRCUIT = {}
+
+
+def reset_stats():
+    _STATS.clear()
+    _CIRCUIT.clear()
+
+
+def snapshot_stats():
+    return {s: dict(v) for s, v in _STATS.items()}
+
+
+def _stat(src, key, n=1):
+    st = _STATS.setdefault(src, {"calls": 0, "ok": 0, "http429": 0, "http4xx": 0,
+                                 "http5xx": 0, "timeout": 0, "other_err": 0,
+                                 "retries": 0, "short_circuited": 0, "secs": 0.0})
+    st[key] += n
+
+
+def _trip_check(src):
+    c = _CIRCUIT.setdefault(src, {"fails": 0, "open": False})
+    c["fails"] += 1
+    if not c["open"] and c["fails"] >= CIRCUIT_FAILS:
+        c["open"] = True
+        print(f"[sources] {src} 连续失败 {c['fails']} 次，本轮熔断，跳过后续请求", flush=True)
 
 # 这些是计价资产/稳定币，不当作「币」进宇宙
 QUOTE_SYMBOLS = {"WETH", "ETH", "USDC", "USDT", "USDG", "DAI", "USDE", "WBTC", "CBBTC", "U", "USD1"}
@@ -21,27 +51,63 @@ def _throttle(src):
     _last[src] = time.time()
 
 
-def get_json(src, url, body=None, tries=3, timeout=20):
+def get_json(src, url, body=None, tries=None, timeout=None):
+    """单源限速 + 重试 + 本轮熔断。
+    - 404 视为正常「查无」，返回 None，不计失败；
+    - 其它 4xx（如 403）不重试（重试不会变好），计一次失败；
+    - 429 / 5xx / 超时才退避重试；同一源连续失败 CIRCUIT_FAILS 次后本轮熔断。"""
+    tries = HTTP_TRIES if tries is None else tries
+    timeout = HTTP_TIMEOUT if timeout is None else timeout
+    if _CIRCUIT.get(src, {}).get("open"):
+        _stat(src, "short_circuited")
+        return None
     headers = dict(UA)
     data = None
     if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
+    t_call = time.time()
+    _stat(src, "calls")
     for i in range(tries):
         _throttle(src)
         try:
             req = urllib.request.Request(url, data=data, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode())
+                out = json.loads(r.read().decode())
+                _stat(src, "ok")
+                _CIRCUIT.setdefault(src, {"fails": 0, "open": False})["fails"] = 0
+                _stat(src, "secs", round(time.time() - t_call, 2))
+                return out
         except urllib.error.HTTPError as e:
             if e.code == 429:          # 被限速：退避更久
-                time.sleep(15 * (i + 1))
+                _stat(src, "http429")
+                if i + 1 >= tries:
+                    _trip_check(src)
+                    break
+                time.sleep(10 * (i + 1))
+                _stat(src, "retries")
                 continue
             if e.code == 404:
+                _stat(src, "http4xx")
+                _stat(src, "secs", round(time.time() - t_call, 2))
                 return None
+            _stat(src, "http4xx" if 400 <= e.code < 500 else "http5xx")
+            if 400 <= e.code < 500:
+                _trip_check(src)       # 403/400 这类：不重试，但计失败供熔断
+                break
+            if i + 1 >= tries:
+                _trip_check(src)
+                break
             time.sleep(2 * (i + 1))
-        except Exception:
+            _stat(src, "retries")
+        except Exception as e:
+            _stat(src, "timeout" if "timed out" in str(e) else "other_err")
+            if i + 1 >= tries:
+                _trip_check(src)
+                break
             time.sleep(2 * (i + 1))
+            _stat(src, "retries")
+    _stat(src, "secs", round(time.time() - t_call, 2))
     return None
 
 

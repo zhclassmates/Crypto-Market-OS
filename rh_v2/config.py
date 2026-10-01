@@ -3,6 +3,14 @@ import os
 
 DB_PATH = os.environ.get("RHV2_DB", os.path.join(os.path.dirname(__file__), "rhv2.sqlite"))
 OUT_DIR = os.environ.get("RHV2_OUT", os.path.join(os.path.dirname(__file__), "out"))
+LOCK_PATH = os.path.join(os.path.dirname(__file__), "collector.lock")
+
+# ---- 单轮运行控制 ----
+BUDGET_SECS = 570              # 单轮总预算（<10 分钟）；超时后跳过剩余非关键步骤
+LISTINGS_BUDGET_SECS = 240     # 交易所状态刷新（每日一次）最多占用的时间
+CIRCUIT_FAILS = 3              # 同一数据源连续失败多少次后本轮熔断，不再请求
+HTTP_TIMEOUT = 12             # 单次请求超时秒数
+HTTP_TRIES = 3                # 单次请求最大尝试次数（4xx 除 429 外不重试）
 
 # ---- 链 ----
 CHAIN_DS = "robinhood"          # DexScreener chainId

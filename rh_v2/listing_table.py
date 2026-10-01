@@ -12,13 +12,16 @@ DAY_MS = 86_400_000
 WINDOWS = {"7": 7, "30": 30, "90": 90}
 
 
-def refresh_listings(con, now=None):
+def refresh_listings(con, now=None, deadline=None):
+    """deadline：绝对时间戳。现货首根日 K 是逐币调用，到点后剩余的本轮跳过，
+    已写入的 perp/alpha 不回滚，下一轮每日窗口继续补 spot_ms。"""
     now = now or int(time.time())
     alpha = S.binance_alpha()
     if not alpha:
         return {"ok": False, "why": "币安 Alpha 列表拉取失败"}
     perp, spot = S.binance_perp(), S.binance_spot()
     aster, hl = S.aster_perp(), S.hl_perp()
+    spot_skipped = 0
 
     # ---- 1) 全链 Alpha 升档事件表 ----
     for t in alpha:
@@ -32,6 +35,9 @@ def refresh_listings(con, now=None):
                           (t["symbol"], t["chain_id"], t["address"])).fetchone()
         s_ms = old["spot_ms"] if old else None
         if s_ms is None and t["symbol"] in spot:
+            if deadline is not None and time.time() >= deadline:
+                spot_skipped += 1
+                continue
             s_ms = S.binance_spot_first_ms(t["symbol"])
             if s_ms and s_ms < a_ms - DAY_MS:
                 s_ms = -1
@@ -68,7 +74,8 @@ def refresh_listings(con, now=None):
             con.execute("INSERT OR REPLACE INTO listings VALUES(?,?,?,?,?,?)", (*r, now))
             n += 1
     con.commit()
-    return {"ok": True, "alpha_total": len(alpha), "rh_alpha": len(alpha_by_addr), "universe_hits": n}
+    return {"ok": True, "alpha_total": len(alpha), "rh_alpha": len(alpha_by_addr),
+            "universe_hits": n, "spot_skipped": spot_skipped}
 
 
 def venues(con):
