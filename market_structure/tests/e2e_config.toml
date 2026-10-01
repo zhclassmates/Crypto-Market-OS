@@ -1,0 +1,25 @@
+[general]
+db_path = "data/e2e.sqlite"
+bar_interval = "1m"
+lookback_days = 1
+poll_delay_sec = 2
+request_gap_sec = 0.0
+tz = "Asia/Shanghai"
+health_at = "23:30"
+[[symbols]]
+symbol = "BTCUSDT"
+spot = true
+[[symbols]]
+symbol = "ETHUSDT"
+spot = false
+[[symbols]]
+symbol = "BADUSDT"
+spot = false
+[binance]
+fapi = "http://127.0.0.1:18080"
+spot_api = "http://127.0.0.1:18080"
+force_order_ws = "ws://127.0.0.1:18080/ws/!forceOrder@arr"
+[bybit]
+enabled = true
+api = "http://127.0.0.1:18080"
+ws = "ws://127.0.0.1:18080/v5/public/linear"

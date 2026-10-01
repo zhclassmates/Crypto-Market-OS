@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- macOS 每小时第 3 分钟跑一次。把 __DIR__ 换成本文件夹的绝对路径后：
+     cp com.rhv2.collector.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.rhv2.collector.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.rhv2.collector</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/python3</string><string>__DIR__/run.py</string><string>once</string>
+  </array>
+  <key>WorkingDirectory</key><string>__DIR__</string>
+  <key>StartCalendarInterval</key><dict><key>Minute</key><integer>3</integer></dict>
+  <key>StandardOutPath</key><string>__DIR__/collector.log</string>
+  <key>StandardErrorPath</key><string>__DIR__/collector.log</string>
+</dict></plist>

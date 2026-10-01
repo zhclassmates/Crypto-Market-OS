@@ -1,0 +1,33 @@
+# market_structure 采集器配置。复制为 config.toml 后修改。
+# 时间全部按 UTC 毫秒存库；只有 health_at 按 tz 解释。
+
+[general]
+db_path = "data/market_structure.sqlite"
+bar_interval = "15m"      # 采集粒度；决策层之后可在库里重采样成 1h/4h
+lookback_days = 30        # 首次启动回补天数（Binance OI 历史最多约 30 天，会自动截到 29 天）
+poll_delay_sec = 20       # bar 收盘后等多少秒再拉，给交易所落数据的时间
+request_gap_sec = 0.25    # 两次 REST 请求之间的间隔，防限频
+tz = "Asia/Shanghai"
+health_at = "23:30"       # 每晚本地时间自动出健康报告
+proxy = ""                # 例如 "http://127.0.0.1:7890"；留空则使用环境变量 HTTPS_PROXY
+
+# 币池 = 十月 Change-to-Trade 实验候选 + BTC/ETH。
+# symbol 用 Binance USD-M 永续命名；spot=true 表示 Binance 现货有同名交易对（用于 Spot CVD）。
+[[symbols]]
+symbol = "BTCUSDT"
+spot = true
+
+[[symbols]]
+symbol = "ETHUSDT"
+spot = true
+
+[binance]
+fapi = "https://fapi.binance.com"
+spot_api = "https://api.binance.com"
+# 全市场强平流：订阅一次，记录所有品种（币池换了也不丢历史）
+force_order_ws = "wss://fstream.binance.com/ws/!forceOrder@arr"
+
+[bybit]
+enabled = true            # 仅作交叉校验：OI(15min) + 资金费率 + allLiquidation
+api = "https://api.bybit.com"
+ws = "wss://stream.bybit.com/v5/public/linear"
