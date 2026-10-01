@@ -51,9 +51,10 @@ def write_health(cfg: Config) -> str:
     return text
 
 
-async def nightly(cfg: Config):
+async def nightly(cfg: Config, stop: asyncio.Event):
     tz = ZoneInfo(cfg.tz)
     hh, mm = map(int, cfg.health_at.split(":"))
+    from . import sync_symbols
     while True:
         now = datetime.now(tz)
         nxt = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
@@ -65,6 +66,14 @@ async def nightly(cfg: Config):
             log.info("健康报告:\n%s", text)
         except Exception as e:  # noqa: BLE001
             log.error("健康报告失败: %s", e)
+        try:
+            changed, _ = await sync_symbols.run(cfg)
+            if changed:
+                log.info("币池已变化，触发重启以加载新配置")
+                stop.set()
+                return
+        except Exception as e:  # noqa: BLE001
+            log.error("币池同步失败: %s", e)
 
 
 def _session() -> aiohttp.ClientSession:
@@ -77,12 +86,12 @@ async def run(cfg: Config):
     async with _session() as s:
         poller = Poller(cfg, store, s)
         streams = build_streams(cfg, store, s)
+        stop = asyncio.Event()
         tasks = [asyncio.create_task(poller.loop(), name="poller"),
-                 asyncio.create_task(nightly(cfg), name="nightly")]
+                 asyncio.create_task(nightly(cfg, stop), name="nightly")]
         for st in streams:
             tasks += [asyncio.create_task(st.run(), name=f"ws.{st.venue}"),
                       asyncio.create_task(st.housekeeping(), name=f"hk.{st.venue}")]
-        stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, stop.set)
@@ -109,7 +118,7 @@ async def once(cfg: Config):
 
 def main():
     ap = argparse.ArgumentParser(prog="ms")
-    ap.add_argument("cmd", choices=["run", "once", "health"])
+    ap.add_argument("cmd", choices=["run", "once", "health", "sync"])
     ap.add_argument("--config", default="config.toml")
     ap.add_argument("--hours", type=float, default=24)
     a = ap.parse_args()
@@ -117,6 +126,12 @@ def main():
     if a.cmd == "health":
         con = connect(cfg.db_path, readonly=True)
         print(health.report(cfg, con, a.hours))
+        return
+    if a.cmd == "sync":
+        setup_logging(cfg)
+        from . import sync_symbols
+        changed, new = asyncio.run(sync_symbols.run(cfg))
+        print(f"sync 完成: changed={changed}, 新合约={new}")
         return
     setup_logging(cfg)
     asyncio.run(run(cfg) if a.cmd == "run" else once(cfg))

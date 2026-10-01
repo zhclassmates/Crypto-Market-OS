@@ -48,6 +48,7 @@ class Config:
     bybit_api: str
     bybit_ws: str
     base_dir: Path = field(default_factory=Path.cwd)
+    config_path: Path = field(default_factory=lambda: Path.cwd() / "config.toml")
 
     @property
     def interval_ms(self) -> int:
@@ -84,4 +85,5 @@ def load_config(path: str | Path) -> Config:
         bybit_api=y.get("api", "https://api.bybit.com").rstrip("/"),
         bybit_ws=y.get("ws", "wss://stream.bybit.com/v5/public/linear"),
         base_dir=path.parent,
+        config_path=path,
     )
