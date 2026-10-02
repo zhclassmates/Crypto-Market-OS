@@ -6,3 +6,11 @@ logs/
 reports/
 .venv/
 config.toml
+node_modules/
+.DS_Store
+.vercel/
+.playwright-mcp/
+screenshots/
+rh_v2/*.lock
+scripts/*.out.json
+scripts/rebuild-market-finalized.*.json

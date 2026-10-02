@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-"""Independent Oracle for market ranking N-day return and consecutive-up streak.
+"""Oracle 1: DB oracle for market ranking.
 
-Does not import collector streak helpers. Reads rh_v2/market.sqlite daily_kline
-and recomputes from raw closed UTC daily candles.
-
-Contract (user spec):
-  ts is candle OPEN (UTC midnight).
-  closed iff ts + 86400 <= now.
-  return_N = last_closed_close / close_N_contiguous_daily_intervals_ago - 1
-    requires N+1 closed candles with no calendar gap; else None.
-  streak = count of adjacent closed days from the tail where close[t] > close[t-1];
-    equal close or down day or calendar gap stops. Independent of selectedDays.
+Independent of TypeScript production functions and collector streak helpers.
+Reads rh_v2/market.sqlite raw daily_kline / token_candle and recomputes
+OPEN / PROVISIONAL / FINALIZED, N-day return, and streak.
 """
 
 from __future__ import annotations
@@ -24,23 +17,33 @@ import time
 from datetime import datetime, timezone
 
 DAY = 86400
+KLINE_FETCH_WINDOW_SEC = 100 * DAY
 NS = (1, 2, 3, 5, 7, 10, 14, 30)
 MUST = [
     "PUMPGU",
     "STOCKER",
+    "DRMR",
+    "HEARTH",
     "SAPLING",
     "PRIORS",
     "UDR",
     "PARLEY",
     "SPIKE",
     "ATLAS",
-    "DRMR",
     "CINEMA",
 ]
+LOW_BASE_CLOSE = 1e-8
+EXTREME_ABS_RETURN = 50
 
 
 def utc_iso(ts: int) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def utc_full(ts: int | None) -> str | None:
+    if ts is None:
+        return None
+    return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def connect(path: str) -> sqlite3.Connection:
@@ -50,77 +53,146 @@ def connect(path: str) -> sqlite3.Connection:
     return con
 
 
-def closed_from_daily(bars: list[tuple[int, float]], now: int) -> list[tuple[int, float]]:
-    """User-spec closed set: candle end <= now, close > 0. No fetch-time filter."""
-    by_ts: dict[int, float] = {}
-    for ts, close in bars:
+def utc_day_start(now: int) -> int:
+    return now - now % DAY
+
+
+def bar_end(ts: int) -> int:
+    return int(ts) + DAY
+
+
+def bar_eligible_by_creation(bar_ts: int, created_at: int | None) -> bool:
+    if created_at is None or created_at <= 0:
+        return True
+    return int(bar_ts) >= utc_day_start(int(created_at))
+
+
+def observation_proves_final(bar_open: int, observed_at: int | None) -> bool:
+    if observed_at is None:
+        return False
+    obs = int(observed_at)
+    opened = int(bar_open)
+    if obs < opened + DAY:
+        return False
+    if opened < obs - KLINE_FETCH_WINDOW_SEC:
+        return False
+    return True
+
+
+def bar_status(ts: int, fetched_at: int | None, now: int, finalized_at: int | None = None) -> str:
+    if bar_end(ts) > now:
+        return "OPEN"
+    if observation_proves_final(ts, finalized_at) or observation_proves_final(ts, fetched_at):
+        return "FINALIZED"
+    return "PROVISIONAL"
+
+
+def classify(bars: list[dict], now: int, created_at: int | None) -> list[dict]:
+    by_ts: dict[int, dict] = {}
+    for bar in bars:
+        ts = int(bar["ts"])
+        close = bar["close"]
         if close is None or close <= 0:
             continue
-        ts = int(ts)
-        if ts + DAY > now:
+        if not bar_eligible_by_creation(ts, created_at):
             continue
-        by_ts[ts] = float(close)
-    return sorted(by_ts.items())
+        status = bar_status(ts, bar.get("fetched_at"), now, bar.get("finalized_at"))
+        by_ts[ts] = {
+            "ts": ts,
+            "close": float(close),
+            "end": bar_end(ts),
+            "fetched_at": bar.get("fetched_at"),
+            "finalized_at": bar.get("finalized_at"),
+            "status": status,
+        }
+    return [by_ts[k] for k in sorted(by_ts)]
 
 
-def closed_current_code(
-    bars: list[tuple[int, float]],
-    now: int,
-    kline_fetched_at: int | None,
-    created_at: int | None,
-) -> list[tuple[int, float]]:
-    """Replay src/lib/rh/streak.ts closedBars."""
-    if kline_fetched_at is None:
-        return []
-    by_ts: dict[int, float] = {}
-    for ts, close in bars:
-        if close is None or close <= 0:
-            continue
-        ts = int(ts)
-        end = ts + DAY
-        if end > now:
-            continue
-        if kline_fetched_at < end:
-            continue
-        if created_at is not None and end <= created_at:
-            continue
-        by_ts[ts] = float(close)
-    return sorted(by_ts.items())
-
-
-def return_n(closed: list[tuple[int, float]], n: int) -> float | None:
-    if len(closed) < n + 1:
+def return_n(finalized: list[dict], n: int) -> float | None:
+    if len(finalized) < n + 1:
         return None
-    window = closed[-(n + 1) :]
+    window = finalized[-(n + 1) :]
     for i in range(1, len(window)):
-        if window[i][0] - window[i - 1][0] != DAY:
+        if window[i]["ts"] - window[i - 1]["ts"] != DAY:
             return None
-    base = window[0][1]
-    last = window[-1][1]
+    base = window[0]["close"]
+    last = window[-1]["close"]
     if base <= 0 or last <= 0:
         return None
     return last / base - 1
 
 
-def streak_of(closed: list[tuple[int, float]]) -> int:
+def streak_of(finalized: list[dict]) -> int | None:
+    if len(finalized) < 2 or finalized[-1]["ts"] - finalized[-2]["ts"] != DAY:
+        return None
     streak = 0
-    for i in range(len(closed) - 1, 0, -1):
-        if closed[i][0] - closed[i - 1][0] != DAY:
+    for i in range(len(finalized) - 1, 0, -1):
+        if finalized[i]["ts"] - finalized[i - 1]["ts"] != DAY:
             break
-        if closed[i][1] > closed[i - 1][1]:
+        if finalized[i]["close"] > finalized[i - 1]["close"]:
             streak += 1
         else:
             break
     return streak
 
 
-def change1d(closed: list[tuple[int, float]]) -> float | None:
-    if len(closed) < 2:
+def streak_status(streak: int | None) -> str:
+    if streak is None:
+        return "INSUFFICIENT_DATA"
+    if streak >= 1:
+        return "POSITIVE_STREAK"
+    return "VALID_ZERO"
+
+
+def change1d(finalized: list[dict]) -> float | None:
+    if len(finalized) < 2:
         return None
-    prev, last = closed[-2], closed[-1]
-    if last[0] - prev[0] != DAY or prev[1] <= 0:
+    prev, last = finalized[-2], finalized[-1]
+    if last["ts"] - prev["ts"] != DAY or prev["close"] <= 0:
         return None
-    return last[1] / prev[1] - 1
+    return last["close"] / prev["close"] - 1
+
+
+def official_metrics(bars: list[dict], now: int, created_at: int | None, n: int) -> dict:
+    classified = classify(bars, now, created_at)
+    calendar = [b for b in classified if b["status"] != "OPEN"]
+    finalized = [b for b in classified if b["status"] == "FINALIZED"]
+    last_status = calendar[-1]["status"] if calendar else None
+    if not calendar or calendar[-1]["status"] != "FINALIZED":
+        return {
+            "streak": None,
+            "streak_status": "INSUFFICIENT_DATA",
+            "change1d": None,
+            "changeNd": None,
+            "closed": len(finalized),
+            "last_status": last_status,
+            "classified": classified,
+            "finalized": finalized,
+            "calendar": calendar,
+        }
+    ret = return_n(finalized, n)
+    chg = change1d(finalized)
+    flags = []
+    if len(finalized) >= 2 and finalized[-1]["ts"] - finalized[-2]["ts"] == DAY:
+        if 0 < finalized[-2]["close"] < LOW_BASE_CLOSE:
+            flags.append("LOW_BASE")
+    if chg is not None and abs(chg) >= EXTREME_ABS_RETURN:
+        flags.append("EXTREME_RETURN")
+    if ret is not None and abs(ret) >= EXTREME_ABS_RETURN and "EXTREME_RETURN" not in flags:
+        flags.append("EXTREME_RETURN")
+    streak = streak_of(finalized)
+    return {
+        "streak": streak,
+        "streak_status": streak_status(streak),
+        "change1d": chg,
+        "changeNd": ret,
+        "closed": len(finalized),
+        "last_status": last_status,
+        "classified": classified,
+        "finalized": finalized,
+        "calendar": calendar,
+        "quality_flags": flags,
+    }
 
 
 def pct(v: float | None) -> str:
@@ -149,14 +221,32 @@ def load_universe(con: sqlite3.Connection) -> list[sqlite3.Row]:
     )
 
 
-def load_bars(con: sqlite3.Connection) -> dict[tuple[str, str], list[tuple[int, float]]]:
-    out: dict[tuple[str, str], list[tuple[int, float]]] = {}
-    for row in con.execute("SELECT chain, address, ts, close FROM daily_kline"):
+def table_cols(con: sqlite3.Connection, table: str) -> set[str]:
+    return {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+
+
+def load_bars(con: sqlite3.Connection) -> dict[tuple[str, str], list[dict]]:
+    cols = table_cols(con, "daily_kline")
+    has_fetched = "fetched_at" in cols
+    sql = (
+        "SELECT chain, address, ts, close, fetched_at, finalized_at FROM daily_kline"
+        if has_fetched
+        else "SELECT chain, address, ts, close, NULL AS fetched_at, NULL AS finalized_at FROM daily_kline"
+    )
+    out: dict[tuple[str, str], list[dict]] = {}
+    for row in con.execute(sql):
         try:
             close = float(row["close"])
         except (TypeError, ValueError):
             continue
-        out.setdefault((row["chain"], row["address"]), []).append((int(row["ts"]), close))
+        out.setdefault((row["chain"], row["address"]), []).append(
+            {
+                "ts": int(row["ts"]),
+                "close": close,
+                "fetched_at": None if row["fetched_at"] is None else int(row["fetched_at"]),
+                "finalized_at": None if row["finalized_at"] is None else int(row["finalized_at"]),
+            }
+        )
     return out
 
 
@@ -168,49 +258,40 @@ def display_created(token_created: int | None, pair_created: int | None) -> int 
     return None
 
 
-def token_payload(row: sqlite3.Row, bars: list[tuple[int, float]], now: int) -> dict:
+def token_payload(row: sqlite3.Row, bars: list[dict], now: int) -> dict:
     created = display_created(row["token_created_at"], row["pair_created_at"])
     fetched = row["kline_fetched_at"]
     fetched_i = int(fetched) if fetched is not None else None
-    spec = closed_from_daily(bars, now)
-    code = closed_current_code(bars, now, fetched_i, created)
-    liq = row["liquidity_num"]
-    if liq is None and row["liquidity"] not in (None, ""):
-        try:
-            liq = float(row["liquidity"])
-        except (TypeError, ValueError):
-            liq = None
-    liq_age = None
-    if row["liquidity_updated_at"] is not None:
-        liq_age = now - int(row["liquidity_updated_at"])
-    returns_spec = {n: return_n(spec, n) for n in NS}
-    returns_code = {n: return_n(code, n) for n in NS}
+    m5 = official_metrics(bars, now, created, 5)
+    returns = {n: official_metrics(bars, now, created, n)["changeNd"] for n in NS}
+    classified = m5["classified"]
+    last_bars = classified[-8:]
     return {
         "chain": row["chain"],
         "address": row["address"],
         "symbol": row["symbol"],
         "kline_fetched_at": fetched_i,
         "created_at": created,
-        "liquidity": liq,
-        "liquidity_age_sec": liq_age,
         "raw_bars": len(bars),
-        "unfinished": sum(1 for ts, _ in bars if ts + DAY > now),
-        "closed_spec": len(spec),
-        "closed_code": len(code),
-        "spec_dates": [utc_iso(ts) for ts, _ in spec[-12:]],
-        "spec_closes": [c for _, c in spec[-12:]],
-        "code_dates": [utc_iso(ts) for ts, _ in code[-12:]],
-        "code_closes": [c for _, c in code[-12:]],
-        "streak_spec": streak_of(spec),
-        "streak_code": streak_of(code),
-        "change1d_spec": change1d(spec),
-        "change1d_code": change1d(code),
-        "returns_spec": returns_spec,
-        "returns_code": returns_code,
-        "pc_24h": row["pc_24h"],
-        "kline_stale_today": fetched_i is None or fetched_i < (now - now % DAY),
-        "liq_ok": liq is not None and liq >= 50_000,
-        "liq_fresh": liq_age is not None and liq_age <= 300,
+        "last_status": m5["last_status"],
+        "closed_finalized": m5["closed"],
+        "streak": m5["streak"],
+        "change1d": m5["change1d"],
+        "returns": returns,
+        "quality_flags": m5.get("quality_flags", []),
+        "bar_detail": [
+            {
+                "date": utc_iso(b["ts"]),
+                "ts": b["ts"],
+                "barEnd": b["end"],
+                "close": b["close"],
+                "fetched_at": utc_full(b["fetched_at"]),
+                "finalized_at": utc_full(b["finalized_at"]),
+                "status": b["status"],
+            }
+            for b in last_bars
+        ],
+        "kline_stale_today": fetched_i is None or fetched_i < utc_day_start(now),
     }
 
 
@@ -226,7 +307,7 @@ def main() -> int:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     db_path = os.path.join(root, "rh_v2", "market.sqlite")
     now = int(time.time())
-    today = now - now % DAY
+    today = utc_day_start(now)
     rng = random.Random(20261002)
 
     con = connect(db_path)
@@ -234,6 +315,13 @@ def main() -> int:
     bars_map = load_bars(con)
     registry_n = con.execute("SELECT COUNT(*) AS n FROM token_registry").fetchone()["n"]
     kline_tokens = con.execute("SELECT COUNT(DISTINCT chain || ':' || address) AS n FROM daily_kline").fetchone()["n"]
+    y_open = today - DAY
+    y_stats = con.execute(
+        """SELECT COUNT(*) AS n,
+                  SUM(CASE WHEN fetched_at IS NOT NULL AND fetched_at >= ? THEN 1 ELSE 0 END) AS fin
+           FROM token_candle WHERE candle_open_ts=?""",
+        (today, y_open),
+    ).fetchone()
     meta = {r["k"]: r["v"] for r in con.execute("SELECT k, v FROM market_meta")}
     con.close()
 
@@ -241,21 +329,10 @@ def main() -> int:
     for row in rows:
         payloads.append(token_payload(row, bars_map.get((row["chain"], row["address"]), []), now))
 
-    # Eligibility waterfall for each N
     waterfall = {}
     for n in NS:
-        enough = [p for p in payloads if p["returns_spec"][n] is not None]
-        enough_code = [p for p in payloads if p["returns_code"][n] is not None]
-        liq = [p for p in enough if p["liq_ok"]]
-        fresh = [p for p in liq if p["liq_fresh"]]
-        waterfall[n] = {
-            "registry": registry_n,
-            "enough_candle_history_spec": len(enough),
-            "enough_candle_history_code": len(enough_code),
-            "liquidity_qualified_among_enough": len(liq),
-            "fresh_qualified_among_liq": len(fresh),
-            "final_n_day_eligible_spec": len(enough),
-        }
+        enough = [p for p in payloads if p["returns"][n] is not None]
+        waterfall[n] = {"registry": registry_n, "enough_finalized": len(enough)}
 
     named = []
     missing = []
@@ -267,61 +344,12 @@ def main() -> int:
         for row in hits:
             named.append(token_payload(row, bars_map.get((row["chain"], row["address"]), []), now))
 
-    # 20 random tokens that have at least one closed candle
-    with_closed = [p for p in payloads if p["closed_spec"] >= 2]
-    sample = rng.sample(with_closed, min(20, len(with_closed)))
+    with_final = [p for p in payloads if p["closed_finalized"] >= 2]
+    sample = rng.sample(with_final, min(20, len(with_final))) if with_final else []
 
-    # Divergence between user-spec closed set and current closedBars
-    diverge = []
-    for p in payloads:
-        if p["streak_spec"] != p["streak_code"] or p["returns_spec"] != p["returns_code"]:
-            diverge.append(
-                {
-                    "symbol": p["symbol"],
-                    "address": p["address"],
-                    "streak_spec": p["streak_spec"],
-                    "streak_code": p["streak_code"],
-                    "closed_spec": p["closed_spec"],
-                    "closed_code": p["closed_code"],
-                    "kline_fetched_at": p["kline_fetched_at"],
-                    "kline_stale_today": p["kline_stale_today"],
-                    "ret5_spec": p["returns_spec"][5],
-                    "ret5_code": p["returns_code"][5],
-                }
-            )
-
-    def slim(p: dict) -> dict:
-        return {
-            "symbol": p["symbol"],
-            "chain": p["chain"],
-            "address": p["address"],
-            "kline_fetched_at": p["kline_fetched_at"],
-            "kline_stale_today": p["kline_stale_today"],
-            "created_at": p["created_at"],
-            "raw_bars": p["raw_bars"],
-            "unfinished": p["unfinished"],
-            "closed_spec": p["closed_spec"],
-            "closed_code": p["closed_code"],
-            "closed_dates": p["spec_dates"],
-            "closed_closes": p["spec_closes"],
-            "code_dates": p["code_dates"],
-            "streak_spec": p["streak_spec"],
-            "streak_code": p["streak_code"],
-            "change1d_spec": p["change1d_spec"],
-            "change1d_code": p["change1d_code"],
-            "returns_spec": {str(k): v for k, v in p["returns_spec"].items()},
-            "returns_code": {str(k): v for k, v in p["returns_code"].items()},
-            "pc_24h": p["pc_24h"],
-        }
-
-    top_spec_5 = sorted(
-        [p for p in payloads if p["returns_spec"][5] is not None],
-        key=lambda p: p["returns_spec"][5],
-        reverse=True,
-    )[:10]
-    top_code_5 = sorted(
-        [p for p in payloads if p["returns_code"][5] is not None],
-        key=lambda p: p["returns_code"][5],
+    top5 = sorted(
+        [p for p in payloads if p["returns"][5] is not None],
+        key=lambda p: p["returns"][5],
         reverse=True,
     )[:10]
 
@@ -329,26 +357,30 @@ def main() -> int:
         "now": now,
         "now_iso": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
         "today_utc": utc_iso(today),
+        "yesterday_utc": utc_iso(y_open),
         "meta": {
             "last_market_update": meta.get("last_market_update"),
             "last_kline_update": meta.get("last_kline_update"),
-            "last_price_update": meta.get("last_price_update"),
         },
         "registry": registry_n,
         "kline_tokens": kline_tokens,
+        "yesterday_bars": y_stats["n"],
+        "yesterday_finalized": y_stats["fin"],
         "waterfall": waterfall,
-        "diverge_count": len(diverge),
-        "diverge_sample": diverge[:15],
         "named_missing": missing,
-        "named": [slim(p) for p in named],
-        "random20": [slim(p) for p in sample],
-        "top10_5d_spec": [
-            {"symbol": p["symbol"], "address": p["address"], "ret5": p["returns_spec"][5], "streak": p["streak_spec"]}
-            for p in top_spec_5
-        ],
-        "top10_5d_code": [
-            {"symbol": p["symbol"], "address": p["address"], "ret5": p["returns_code"][5], "streak": p["streak_code"]}
-            for p in top_code_5
+        "named": named,
+        "random20": sample,
+        "top10_5d": [
+            {
+                "symbol": p["symbol"],
+                "chain": p["chain"],
+                "address": p["address"],
+                "ret5": p["returns"][5],
+                "streak": p["streak"],
+                "last_status": p["last_status"],
+                "quality_flags": p["quality_flags"],
+            }
+            for p in top5
         ],
     }
 
@@ -358,34 +390,27 @@ def main() -> int:
 
     print(f"now {report['now_iso']} today_utc {report['today_utc']}")
     print(f"registry {registry_n} kline_tokens {kline_tokens}")
-    print(f"last_kline_update {meta.get('last_kline_update')}")
+    print(f"yesterday bars {y_stats['n']} finalized {y_stats['fin']}")
     print("waterfall:")
     for n in NS:
-        w = waterfall[n]
-        print(
-            f"  {n}D spec={w['enough_candle_history_spec']} code={w['enough_candle_history_code']} "
-            f"liq={w['liquidity_qualified_among_enough']} fresh={w['fresh_qualified_among_liq']}"
-        )
-    print(f"spec vs closedBars diverge: {len(diverge)}")
+        print(f"  {n}D finalized-complete={waterfall[n]['enough_finalized']}")
     print("named missing:", missing)
     print("\n=== MUST tokens ===")
     for p in named:
         print(
-            f"{p['symbol']:12} {p['chain']:10} closed_spec={p['closed_spec']:2} closed_code={p['closed_code']:2} "
-            f"streak_spec={p['streak_spec']} streak_code={p['streak_code']} "
-            f"1D={pct(p['returns_spec'][1])} 5D={pct(p['returns_spec'][5])} 7D={pct(p['returns_spec'][7])} "
-            f"stale={p['kline_stale_today']}"
+            f"{p['symbol']:12} {p['chain']:10} {p['address'][:8]}…{p['address'][-6:]} "
+            f"status={p['last_status']} finalized={p['closed_finalized']:2} "
+            f"streak={p['streak']} 1D={pct(p['returns'][1])} 5D={pct(p['returns'][5])} "
+            f"flags={p['quality_flags']}"
         )
-        print(f"  dates  {p['spec_dates']}")
-        print(f"  closes {[round(c, 8) if c < 1 else round(c, 6) for c in p['spec_closes']]}")
-        if p["spec_dates"] != p["code_dates"]:
-            print(f"  CODE dates {p['code_dates']}")
-    print("\n=== top10 5D spec ===")
-    for i, p in enumerate(top_spec_5, 1):
-        print(f"{i:2} {p['symbol']:12} ret5={pct(p['returns_spec'][5])} streak={p['streak_spec']}")
-    print("\n=== top10 5D current-code closedBars ===")
-    for i, p in enumerate(top_code_5, 1):
-        print(f"{i:2} {p['symbol']:12} ret5={pct(p['returns_code'][5])} streak={p['streak_code']}")
+        for b in p["bar_detail"]:
+            print(
+                f"  {b['date']} ts={b['ts']} end={b['barEnd']} close={b['close']} "
+                f"fetched={b['fetched_at']} status={b['status']}"
+            )
+    print("\n=== top10 5D finalized ===")
+    for i, p in enumerate(top5, 1):
+        print(f"{i:2} {p['symbol']:12} {p['address'][:10]} ret5={pct(p['returns'][5])} streak={p['streak']} {p['last_status']}")
     print(f"\nwrote {out_path}")
     return 0
 

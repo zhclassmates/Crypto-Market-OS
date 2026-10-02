@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Phase 1 研究账本。不打 GMGN，不打开运行库。"""
 import tempfile
+import time
 import unittest
 from datetime import datetime, timezone
 
@@ -317,7 +318,8 @@ class KlineAndMetricsTest(unittest.TestCase):
 
     def test_gap_return_is_null_not_zero(self):
         closed = [(0, 10.0, 10.0), (86400, 12.0, 12.0), (86400 * 3, 20.0, 20.0)]
-        self.assertEqual(R.streak_from_closed(closed), 0)
+        # 最后一根前一天缺：没有证据，不是 0
+        self.assertIsNone(R.streak_from_closed(closed))
         self.assertIsNone(R.returns_from_closed(closed)[0])
         flat = [(0, 10.0, 10.0), (86400, 10.0, 11.0)]
         self.assertEqual(R.streak_from_closed(flat), 0)
@@ -327,6 +329,92 @@ class KlineAndMetricsTest(unittest.TestCase):
         self.assertFalse(R.formal_eligible(100_000, 1000))
         self.assertFalse(R.formal_eligible(30_000, 20))
         self.assertFalse(R.formal_eligible(100_000, None))
+
+    def test_intraday_fetch_is_provisional_after_calendar_close(self):
+        day = 1_700_000_000 - (1_700_000_000 % 86400)
+        during = day + 12 * 3600
+        after = day + 86400 + 120
+        R.ingest_discovery(self.con, "sol", "Mint", "trending", during, liquidity=80_000)
+        written = R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": day, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1},
+        ], during, True)
+        self.assertGreaterEqual(written, 2)
+        candle = self.con.execute(
+            "SELECT fetched_at, finalized_at FROM token_candle WHERE address='Mint' AND candle_open_ts=?",
+            (day,),
+        ).fetchone()
+        self.assertEqual(candle["fetched_at"], during)
+        self.assertIsNone(candle["finalized_at"])
+        self.assertEqual(R.bar_status(day, during, after), R.STATUS_PROVISIONAL)
+        classified = R.classified_candle_rows(self.con, "sol", "Mint", after)
+        self.assertEqual(classified[-1]["status"], R.STATUS_PROVISIONAL)
+        self.assertFalse(R.official_tail_finalized(classified))
+        self.assertEqual(len(R.closed_candle_rows(self.con, "sol", "Mint", after)), 1)
+        dk = self.con.execute(
+            "SELECT fetched_at, finalized_at FROM daily_kline WHERE address='Mint' AND ts=?",
+            (day,),
+        ).fetchone()
+        self.assertEqual(dk["fetched_at"], during)
+        self.assertIsNone(dk["finalized_at"])
+
+    def test_post_close_refetch_finalizes_yesterday(self):
+        day = 1_700_000_000 - (1_700_000_000 % 86400)
+        during = day + 12 * 3600
+        after = day + 86400 + 120
+        R.ingest_discovery(self.con, "sol", "Mint", "trending", during, liquidity=80_000)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": day, "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 1},
+        ], during, True)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": day, "open": 1, "high": 2, "low": 1, "close": 1.4, "volume": 1},
+        ], after, True)
+        candle = self.con.execute(
+            "SELECT close, fetched_at, finalized_at FROM token_candle WHERE address='Mint' AND candle_open_ts=?",
+            (day,),
+        ).fetchone()
+        self.assertEqual(candle["fetched_at"], after)
+        self.assertEqual(candle["finalized_at"], after)
+        self.assertAlmostEqual(candle["close"], 1.4)
+        self.assertEqual(R.bar_status(day, after, after, after), R.STATUS_FINALIZED)
+        closed = R.closed_candle_rows(self.con, "sol", "Mint", after)
+        self.assertEqual(len(closed), 2)
+        self.assertEqual(R.streak_from_closed(closed), 1)
+        self.assertFalse(R.needs_yesterday_finalize(self.con, "sol", "Mint", after))
+
+    def test_created_at_drops_older_days(self):
+        day = 1_700_086_400 - (1_700_086_400 % 86400)
+        now = day + 86400 + 3600
+        created = day + 100
+        R.ingest_discovery(self.con, "sol", "Mint", "trending", now, liquidity=80_000)
+        self.con.execute(
+            "UPDATE tokens SET token_created_at=? WHERE chain='sol' AND address='Mint'",
+            (created,),
+        )
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": day, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1},
+        ], now, True)
+        closed = R.closed_candle_rows(self.con, "sol", "Mint", now, created)
+        self.assertEqual([row[0] for row in closed], [day])
+
+    def test_repair_pick_prefers_unfinalized_yesterday(self):
+        day = 1_700_000_000 - (1_700_000_000 % 86400)
+        during = day + 10 * 3600
+        after = day + 86400 + 180
+        R.ingest_discovery(self.con, "sol", "Need", "trending", during, liquidity=80_000)
+        R.ingest_discovery(self.con, "sol", "Done", "trending", during, liquidity=80_000)
+        R.commit_kline_fetch(self.con, "sol", "Need", [
+            {"time": day, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+        ], during, True)
+        R.commit_kline_fetch(self.con, "sol", "Done", [
+            {"time": day, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+        ], after, True)
+        picked = R.pick_kline_repair(self.con, "sol", after, 8)
+        self.assertIn("Need", picked)
+        self.assertNotIn("Done", picked)
 
 
 class SchedulerTest(unittest.TestCase):
@@ -438,6 +526,256 @@ class HealthWriteTest(unittest.TestCase):
                 "zero_write",
             )
             con.close()
+
+
+class FinalizedContractTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(self.tmp.name + "/t.sqlite")
+        self.day = 1_700_000_000 - (1_700_000_000 % 86400)
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def _seed(self, address="Mint", liquidity=80_000, at=None):
+        at = self.day if at is None else at
+        R.ingest_discovery(self.con, "sol", address, "trending", at, liquidity=liquidity)
+        R.upsert_snapshot_numbers(self.con, "sol", address, at, 1, 1, liquidity, 1, 1)
+
+    def test_intraday_observed_at_not_finalized(self):
+        during = self.day + 12 * 3600
+        after = self.day + 86400 + 120
+        self.assertFalse(R.observation_proves_final(self.day, during))
+        self.assertEqual(R.bar_status(self.day, during, after), R.STATUS_PROVISIONAL)
+
+    def test_intraday_stays_unfinalized_next_day_and_next_year(self):
+        during = self.day + 12 * 3600
+        self.assertEqual(R.bar_status(self.day, during, self.day + 2 * 86400), R.STATUS_PROVISIONAL)
+        self.assertEqual(R.bar_status(self.day, during, self.day + 366 * 86400), R.STATUS_PROVISIONAL)
+
+    def test_observed_at_after_bar_end_is_finalized(self):
+        after = self.day + 86400 + 120
+        self.assertTrue(R.observation_proves_final(self.day, after))
+        self.assertEqual(R.bar_status(self.day, after, after, after), R.STATUS_FINALIZED)
+
+    def test_observed_at_equal_bar_end_is_finalized(self):
+        end = self.day + 86400
+        self.assertTrue(R.observation_proves_final(self.day, end))
+        self.assertEqual(R.bar_status(self.day, end, end + 1), R.STATUS_FINALIZED)
+
+    def test_missing_observed_at_is_not_finalized(self):
+        after = self.day + 86400 + 120
+        self.assertFalse(R.observation_proves_final(self.day, None))
+        self.assertEqual(R.bar_status(self.day, None, after), R.STATUS_PROVISIONAL)
+
+    def test_copy_candles_ignores_migration_now(self):
+        during = self.day + 10 * 3600
+        self.con.execute(
+            "INSERT INTO tokens(chain,address,symbol,kline_fetched_at) VALUES('sol','Old','OLD',?)",
+            (during,),
+        )
+        self.con.execute(
+            "INSERT INTO daily_kline(chain,address,ts,open,high,low,close,volume) "
+            "VALUES('sol','Old',?,'1','1','1','2','1')",
+            (self.day,),
+        )
+        R._copy_candles(self.con, self.day + 86400 + 3600)
+        row = self.con.execute(
+            "SELECT fetched_at, finalized_at, is_closed FROM token_candle WHERE address='Old'"
+        ).fetchone()
+        self.assertEqual(row["fetched_at"], during)
+        self.assertIsNone(row["finalized_at"])
+        self.assertEqual(row["is_closed"], 0)
+        self.con.execute("DELETE FROM token_candle")
+        R._copy_candles(self.con, self.day + 400 * 86400)
+        later = self.con.execute(
+            "SELECT fetched_at, finalized_at, is_closed FROM token_candle WHERE address='Old'"
+        ).fetchone()
+        self.assertEqual(tuple(later), tuple(row))
+
+    def test_rebuild_syncs_newer_per_bar_observation_into_legacy_mirror(self):
+        """CONDO regression: a non-NULL intraday mirror must not hide a later observation."""
+        during = self.day + 12 * 3600
+        after = self.day + 86400 + 120
+        self._seed(at=after)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": self.day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": self.day, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1},
+        ], after, True)
+        # Recreate the legacy split: token_candle has the real post-close fetch,
+        # while daily_kline contains an older but non-NULL intraday timestamp.
+        self.con.execute(
+            "UPDATE daily_kline SET fetched_at=?, finalized_at=NULL WHERE address='Mint' AND ts=?",
+            (during, self.day),
+        )
+        R._backfill_per_bar_fetched(self.con)
+        R.rebuild_candle_finalized(self.con)
+        mirror = self.con.execute(
+            "SELECT fetched_at, finalized_at FROM daily_kline WHERE address='Mint' AND ts=?",
+            (self.day,),
+        ).fetchone()
+        self.assertEqual(mirror["fetched_at"], after)
+        self.assertEqual(mirror["finalized_at"], after)
+
+    def test_refresh_as_of_is_latest_finalized_not_open_tail_or_run_day(self):
+        day2 = self.day + 86400
+        run_at = day2 + 12 * 3600
+        self._seed(at=run_at)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": self.day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": self.day, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1},
+            {"time": day2, "open": 2, "high": 3, "low": 2, "close": 3, "volume": 1},
+        ], run_at, True)
+        metrics = self.con.execute(
+            "SELECT as_of_date, streak FROM daily_metrics WHERE address='Mint'"
+        ).fetchone()
+        self.assertEqual(metrics["as_of_date"], time.strftime("%Y-%m-%d", time.gmtime(self.day)))
+        self.assertEqual(metrics["streak"], 1)
+
+    def test_refresh_clears_stale_positive_when_latest_bar_loses_finalized_proof(self):
+        after = self.day + 86400 + 120
+        during = self.day + 12 * 3600
+        self._seed(at=after)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": self.day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": self.day, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1},
+        ], after, True)
+        before = self.con.execute(
+            "SELECT streak FROM daily_metrics WHERE address='Mint'"
+        ).fetchone()
+        self.assertEqual(before["streak"], 1)
+
+        self.con.execute(
+            "UPDATE token_candle SET fetched_at=?, finalized_at=NULL, is_closed=0 "
+            "WHERE address='Mint' AND candle_open_ts=?",
+            (during, self.day),
+        )
+        refreshed = R.refresh_metrics(self.con, "sol", "Mint", after)
+        rows = self.con.execute(
+            "SELECT as_of_date, streak, return_2d, return_3d, return_5d "
+            "FROM daily_metrics WHERE address='Mint'"
+        ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["streak"])
+        self.assertIsNone(rows[0]["return_2d"])
+        self.assertIsNone(rows[0]["return_3d"])
+        self.assertIsNone(rows[0]["return_5d"])
+        self.assertEqual(refreshed["streak_status"], R.STREAK_INSUFFICIENT)
+
+    def test_nday_uses_finalized_only(self):
+        now = self.day + 86400 + 3600
+        self._seed(at=now)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": self.day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": self.day, "open": 1, "high": 9, "low": 1, "close": 9, "volume": 1},
+        ], self.day + 12 * 3600, True)
+        metrics = R.refresh_metrics(self.con, "sol", "Mint", now)
+        self.assertIsNone(metrics["streak"])
+        self.assertIsNone(metrics["return_2d"])
+        self.assertEqual(metrics["streak_status"], R.STREAK_INSUFFICIENT)
+
+    def test_missing_previous_day_is_insufficient(self):
+        closed = [(0, 10.0, 10.0), (86400 * 2, 20.0, 20.0)]
+        self.assertIsNone(R.streak_from_closed(closed))
+        self.assertEqual(R.streak_status(closed), R.STREAK_INSUFFICIENT)
+
+    def test_valid_zero_when_last_day_did_not_rise(self):
+        closed = [(0, 10.0, 10.0), (86400, 9.0, 11.0)]
+        self.assertEqual(R.streak_from_closed(closed), 0)
+        self.assertEqual(R.streak_status(closed), R.STREAK_ZERO)
+
+    def test_pumpgu_intraday_must_not_mint_1975(self):
+        true_close = 7.7301777e-05
+        intraday = 0.00015835
+        base = true_close / 10.130812
+        closed = [(self.day + i * 86400, base, base) for i in range(5)]
+        closed.append((self.day + 5 * 86400, true_close, true_close))
+        r5 = R.returns_from_closed(closed)[2]
+        self.assertIsNotNone(r5)
+        self.assertLess(abs(r5 * 100 - 913.0812), 1)
+        self.assertLess(r5 * 100, 1900)
+        bogus = list(closed)
+        bogus[-1] = (bogus[-1][0], intraday, intraday)
+        bad = R.returns_from_closed(bogus)[2]
+        self.assertGreater(bad * 100, 1900)
+
+    def test_migrate_twice_is_idempotent(self):
+        during = self.day + 10 * 3600
+        after = self.day + 86400 + 180
+        self._seed(at=during)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": self.day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": self.day, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1},
+        ], after, True)
+        snap = lambda: [
+            dict(r) for r in self.con.execute(
+                "SELECT candle_open_ts, close, fetched_at, finalized_at, is_closed "
+                "FROM token_candle WHERE address='Mint' ORDER BY candle_open_ts"
+            )
+        ]
+        first = snap()
+        R.migrate(self.con)
+        R.migrate(self.con)
+        self.assertEqual(snap(), first)
+
+    def test_migration_now_does_not_change_historical_finalized(self):
+        during = self.day + 8 * 3600
+        self._seed(at=during)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": self.day, "open": 1, "high": 1, "low": 1, "close": 1.2, "volume": 1},
+        ], during, True)
+        R.rebuild_candle_finalized(self.con)
+        row = self.con.execute(
+            "SELECT finalized_at, is_closed FROM token_candle WHERE candle_open_ts=?",
+            (self.day,),
+        ).fetchone()
+        self.assertIsNone(row["finalized_at"])
+        self.assertEqual(row["is_closed"], 0)
+        self.assertEqual(R.bar_status(self.day, during, during + 400 * 86400), R.STATUS_PROVISIONAL)
+
+    def test_qualified_at_rebuild_clears_intraday_qualification(self):
+        during = self.day + 12 * 3600
+        after = self.day + 86400 + 120
+        self._seed(at=during)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": self.day, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+        ], during, True)
+        self.con.execute(
+            "UPDATE token_registry SET qualified_at=?, kline_backfilled_at=? WHERE address='Mint'",
+            (during, during),
+        )
+        self.con.execute(
+            "UPDATE token_candle SET is_closed=1, finalized_at=? WHERE address='Mint'",
+            (after,),
+        )
+        R.rebuild_research_facts(self.con, after)
+        row = self.con.execute("SELECT qualified_at FROM token_registry WHERE address='Mint'").fetchone()
+        self.assertIsNone(row["qualified_at"])
+        metrics = self.con.execute("SELECT streak, qualified_at FROM daily_metrics WHERE address='Mint'").fetchone()
+        self.assertIsNone(metrics["qualified_at"])
+        self.assertIsNone(metrics["streak"])
+
+    def test_proven_historical_candle_is_not_demoted(self):
+        after = self.day + 86400 + 180
+        self._seed(at=after)
+        R.commit_kline_fetch(self.con, "sol", "Mint", [
+            {"time": self.day - 86400, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+            {"time": self.day, "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 1},
+        ], after, True)
+        before = self.con.execute(
+            "SELECT finalized_at, fetched_at FROM token_candle WHERE candle_open_ts=?",
+            (self.day,),
+        ).fetchone()
+        self.assertEqual(before["finalized_at"], after)
+        R.rebuild_research_facts(self.con, after + 10)
+        after_row = self.con.execute(
+            "SELECT finalized_at, fetched_at, is_closed FROM token_candle WHERE candle_open_ts=?",
+            (self.day,),
+        ).fetchone()
+        self.assertEqual(after_row["fetched_at"], after)
+        self.assertEqual(after_row["finalized_at"], after)
+        self.assertEqual(after_row["is_closed"], 1)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { RefreshCw, Search, ArrowUp, ArrowDown, Star } from "lucide-react";
-import { fetchMarketHot, fetchMarketRank, type GmgnClock, type HotToken } from "@/lib/rh/market-server";
+import { fetchMarketHot, fetchMarketRank, type GmgnClock, type HotToken, type MarketEligibility } from "@/lib/rh/market-server";
 import {
   CHAINLINK_POLL_PERIOD,
   GMGN_PRICE_PERIOD,
@@ -25,6 +25,11 @@ import {
   fmtRelativeAge,
   formalStreakEligible,
   klineIsStale,
+  rankingQualityOk,
+  shouldCommitRankWrite,
+  type DailyStatus,
+  type QualityFlag,
+  type StreakStatus,
 } from "@/lib/rh/streak";
 import { MarketHealthBar } from "@/components/market-health-bar";
 import {
@@ -50,10 +55,13 @@ interface RankedToken {
   holders: number | null;
   changeNd: number | null;
   change1d: number | null;
-  streak: number;
+  streak: number | null;
+  streakStatus?: StreakStatus;
   streakReturn: number | null;
   streakDrawdown: number | null;
   closedCandles: number;
+  lastDailyStatus: DailyStatus | null;
+  qualityFlags: QualityFlag[];
   createdAt: number | null;
   createdSource: "token" | "pair" | null;
   tokenCreatedAt: number | null;
@@ -92,6 +100,7 @@ interface ViewToken extends RankedToken {
   liquidityAgeSec: number | null;
   stale: boolean;
   klineStale: boolean;
+  liqStale: boolean;
 }
 
 const CHAIN_TABS = ["all", "sol", "robinhood", "base", "eth"] as const;
@@ -213,8 +222,38 @@ function fmtDrawdown(v: number | null | undefined): string {
 }
 
 function klineTitle(t: ViewToken, now: number): string {
-  if (t.klineFetchedAt == null) return "日K没有成功拉取时间。这个数字不能当成最新价。";
-  return `日K拉取于 ${fmtAge(now - t.klineFetchedAt)} 前。价格更新时间是另一路。`;
+  const status = t.lastDailyStatus ?? "未知";
+  const fetch = t.klineFetchedAt == null ? "没有成功拉取时间" : `拉取于 ${fmtAge(now - t.klineFetchedAt)} 前`;
+  return `最近一根日历已收盘日K状态 ${status}。${fetch}。Finalized 要求 fetched_at >= bar.end。stale 只表示今天 UTC 0 点后还没重拉，不等于未定稿。`;
+}
+
+function DailyStatusTag({ status }: { status: DailyStatus | null | undefined }) {
+  if (status == null) return null;
+  const label = status === "FINALIZED" ? "Final" : status === "PROVISIONAL" ? "Provisional" : "Open";
+  const cls = status === "FINALIZED" ? "text-moss" : status === "PROVISIONAL" ? "text-brass" : "text-muted";
+  return <span className={`mr-1 font-mono text-[10px] ${cls}`}>{label}</span>;
+}
+
+function fmtStreak(v: number | null | undefined, status?: StreakStatus): string {
+  if (status === "INSUFFICIENT_DATA" || v == null || !Number.isFinite(v)) return "—";
+  return v > 0 ? `${v}D` : String(v);
+}
+
+function FieldStale({ show, title }: { show: boolean; title: string }) {
+  if (!show) return null;
+  return <span className="mr-1 font-mono text-[10px] text-clay" title={title}>stale</span>;
+}
+
+function eligibilityTitle(e: MarketEligibility | null, days: number): string {
+  if (!e) return `具备完整数据 = ${days + 1} 根连续 FINALIZED 日K。流动性门槛只约束正式连涨榜。`;
+  return [
+    `名册 ${e.registry} 个`,
+    `完整${e.days}日K（${days + 1} 根连续 finalized）${e.enoughCandleHistory} 个`,
+    `其中流动性≥$${STREAK_MIN_LIQUIDITY.toLocaleString()} ${e.liquidityQualified} 个`,
+    `其中流动性新鲜(≤${LIQUIDITY_FRESHNESS_SEC}s) ${e.freshQualified} 个`,
+    `全市场${e.days}日榜按完整 finalized 日K，共 ${e.finalEligible} 个`,
+    `正式连涨榜另要求流动性≥$${STREAK_MIN_LIQUIDITY.toLocaleString()} 且年龄≤${LIQUIDITY_FRESHNESS_SEC}秒`,
+  ].join(" · ");
 }
 
 function AnchorTag({ t, now }: { t: ViewToken; now: number }) {
@@ -238,6 +277,7 @@ function AnchorTag({ t, now }: { t: ViewToken; now: number }) {
 
 function TokenCell({ t, now, showAnchor }: { t: ViewToken; now: number; showAnchor: boolean }) {
   const [logoOk, setLogoOk] = useState(true);
+  const flags = t.qualityFlags ?? [];
   return (
     <div className="flex items-center gap-2">
       <div className="relative h-8 w-8 shrink-0">
@@ -250,9 +290,12 @@ function TokenCell({ t, now, showAnchor }: { t: ViewToken; now: number; showAnch
         )}
         <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border border-bg ${CHAIN_BADGE[t.chain] || "bg-muted"}`} title={t.chain} />
       </div>
-      <div className="w-36 min-w-0" title={t.name || t.symbol || ""}>
+      <div className="w-36 min-w-0" title={`${t.symbol || "?"} ${t.address}`}>
         <p className="truncate text-sm font-medium leading-tight">{t.symbol || "?"}</p>
-        <p className="truncate font-mono text-xs text-muted leading-tight">{t.name || ""}</p>
+        <p className="truncate font-mono text-[10px] text-muted leading-tight">{shortCa(t.address)}</p>
+        {flags.length > 0 ? (
+          <p className="truncate font-mono text-[10px] text-brass leading-tight">{flags.join(" · ")}</p>
+        ) : null}
         {showAnchor ? <AnchorTag t={t} now={now} /> : null}
       </div>
     </div>
@@ -344,12 +387,16 @@ function decorate(t: RankedToken, clock: GmgnClock | undefined, now: number): Vi
     clock?.sourceTimestampMissing ?? true,
   );
   const liquidityAgeSec = t.liquidityUpdatedAt == null ? null : now - t.liquidityUpdatedAt;
+  const quoteStale = tokenIsStale(ageSec, GMGN_PRICE_PERIOD, t.halt, t.marketClosed);
   return {
     ...t,
     ageSec,
     liquidityAgeSec,
-    stale: tokenIsStale(ageSec, GMGN_PRICE_PERIOD, t.halt, t.marketClosed),
+    stale: quoteStale,
     klineStale: klineIsStale(now, t.klineFetchedAt),
+    liqStale: liquidityAgeSec == null || liquidityAgeSec > 2 * GMGN_PRICE_PERIOD,
+    qualityFlags: t.qualityFlags ?? [],
+    lastDailyStatus: t.lastDailyStatus ?? null,
   };
 }
 
@@ -372,14 +419,19 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
   const [orderTick, setOrderTick] = useState(0);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [registryCount, setRegistryCount] = useState<number | null>(null);
+  const [eligibility, setEligibility] = useState<MarketEligibility | null>(null);
+  const [appliedDays, setAppliedDays] = useState<number | null>(null);
   const [limit, setLimit] = useState(PAGE_ROWS);
 
   const rankFn = useServerFn(fetchMarketRank);
   const hotFn = useServerFn(fetchMarketHot);
   const inflight = useRef<AbortController | null>(null);
+  const rankSeq = useRef(0);
+  const daysRef = useRef(days);
   const hotRef = useRef(hotMap);
   const gmgnRef = useRef(gmgn);
   const nowRef = useRef(now);
+  daysRef.current = days;
   // 自选页只向后端要自选里的币；排行页由后端按榜单条件预筛。
   const watchKeysParam = watchOnly ? watch.map((w) => watchKey(w.chain, w.address)) : undefined;
   const keysRef = useRef(watchKeysParam);
@@ -407,41 +459,49 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
   }
 
   async function load(silent = false) {
+    const requestDays = daysRef.current;
+    const seq = ++rankSeq.current;
     inflight.current?.abort();
     const ctrl = new AbortController();
     inflight.current = ctrl;
-    if (!silent) setLoading(true);
-    setError("");
+    const live = (channel: "data" | "error" | "loading" | "eligibility") =>
+      shouldCommitRankWrite(seq, rankSeq.current, requestDays, daysRef.current, channel) && !ctrl.signal.aborted;
+    if (!silent && live("loading")) setLoading(true);
+    if (live("error")) setError("");
     try {
-      const res = await rankFn({ data: { days, keys: keysRef.current } });
-      if (ctrl.signal.aborted) return;
+      const res = await rankFn({ data: { days: requestDays, keys: keysRef.current } });
+      if (!live("data")) return;
       if (!res.ok) {
-        setError(res.error || "拉取失败");
-        setData([]);
+        if (live("error")) setError(res.error || "拉取失败");
       } else {
-        setData(res.tokens);
-        if (res.registryCount != null) setRegistryCount(res.registryCount);
-        if (res.gmgn) setGmgn(res.gmgn);
+        if (live("data")) setData(res.tokens);
+        if (live("data")) setAppliedDays(res.days ?? requestDays);
+        if (live("eligibility") && res.registryCount != null) setRegistryCount(res.registryCount);
+        if (live("eligibility") && res.eligibility) setEligibility(res.eligibility);
+        if (live("data") && res.gmgn) setGmgn(res.gmgn);
         const ranked = [...res.tokens]
           .filter((t) => t.changeNd != null && isFinite(t.changeNd))
           .sort((a, b) => (b.changeNd ?? -Infinity) - (a.changeNd ?? -Infinity));
         console.debug("[market-rank]", {
-          selectedDays: days,
-          requestDays: days,
+          selectedDays: daysRef.current,
+          requestDays,
           backendDays: res.days,
           calculationDays: res.days,
+          applied: live("data"),
           rows: res.tokens.length,
+          eligibility: res.eligibility,
           top5: ranked.slice(0, 5).map((t) => ({
             symbol: t.symbol,
             address: t.address,
             changeNd: t.changeNd,
+            streak: t.streak,
           })),
         });
       }
     } catch (e) {
-      if (!ctrl.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+      if (live("error")) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (!ctrl.signal.aborted) setLoading(false);
+      if (live("loading")) setLoading(false);
     }
   }
 
@@ -530,9 +590,9 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
 
   const onBoard = (t: ViewToken) => {
     if (watchOnly) return true;
-    if (board === "streak") return formalStreakEligible(t.liquidityNum ?? t.liquidity, t.liquidityAgeSec);
-    // 全市场按 N 日累计排；日K不足 N+1 根的币不符合条件，不列
-    return t.changeNd != null;
+    if (board === "streak") return formalStreakEligible(t.liquidityNum ?? t.liquidity, t.liquidityAgeSec) && t.streak != null;
+    // 全市场按 N 日累计排；需要 N+1 根连续 finalized 日K。质量标签不改公式，只决定是否进正式榜。
+    return t.changeNd != null && rankingQualityOk(t.qualityFlags ?? []);
   };
 
   const order = useMemo(() => {
@@ -588,6 +648,12 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
     }
     return rows;
   }, [filtered, hotMap, gmgn, now, order, board]);
+
+  /** 具备完整数据 = N+1 根连续 FINALIZED 日K。质量标签只决定是否进正式榜，不改这个人数。 */
+  const completeNdCount = useMemo(
+    () => filtered.filter((t) => t.changeNd != null).length,
+    [filtered],
+  );
 
   const movers = useMemo(() => {
     return shown
@@ -754,10 +820,14 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
         </div>
         {customErr && <span className="text-xs text-clay">{customErr}</span>}
         {!watchOnly && data && (
-          <span className="ml-auto font-mono text-xs text-muted" data-testid="board-count">
+          <span
+            className="ml-auto font-mono text-xs text-muted"
+            data-testid="board-count"
+            title={eligibilityTitle(eligibility, days)}
+          >
             {loading ? "计算中…" : board === "streak"
               ? `正式连涨榜 ${shown.length} 个`
-              : `符合 ${days}D 条件 ${shown.length} 个${registryCount != null ? ` · 名册 ${registryCount} 个，其余日K不足 ${days + 1} 根` : ""}`}
+              : `${days}D窗口 · ${completeNdCount} 个具备完整数据${registryCount != null ? ` · 名册 ${registryCount}` : ""}`}
           </span>
         )}
       </div>
@@ -778,7 +848,7 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
       {error && <p className="mb-3 rounded-lg border border-clay/30 bg-clay/10 p-3 text-sm text-clay">{error}</p>}
 
       <div className="overflow-x-auto rounded-xl border border-line">
-        <table className="w-full text-left text-sm" data-days={days} data-sort={String(sortKey)}>
+        <table className="w-full text-left text-sm" data-days={days} data-applied-days={appliedDays ?? ""} data-sort={String(sortKey)}>
           <thead>
             <tr className="border-b border-line bg-surface-2 text-xs text-muted">
               <th className="px-3 py-2 font-mono">#</th>
@@ -790,14 +860,19 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
               {columns === "all" && <th className="px-3 py-2 font-mono text-right">Age</th>}
               <Th k="marketCap" label="Mkt Cap" />
               <Th k="pc24h" label="24H" title="当前价格相对 24 小时前的滚动涨跌幅。" />
-              <Th k="change1d" label="日K" title="最近一根已收盘 UTC 日K，相对前一根已收盘日K的涨跌幅。" />
-              <Th k="streak" label="连涨" right={false} title="连续多少根已收盘 UTC 日K收盘价高于前一日。不受顶部天数按钮影响。" />
+              <Th k="change1d" label="日K" title="最近一根 FINALIZED UTC 日K，相对前一根 FINALIZED 日K的涨跌幅。" />
+              <Th
+                k="streak"
+                label="连续上涨"
+                right={false}
+                title="连续上涨：截至最后一根 FINALIZED 日 K，连续 close > previous close 的天数；与顶部 N 日累计窗口独立。尾部 Provisional 时显示 —。"
+              />
               <Th
                 k="changeNd"
                 label={`${days}D累计`}
-                title="最新已收盘 UTC 日K收盘价，相对 N 个完整日线区间前收盘价的累计变化。顶部天数按钮只改这一列和它的排名。"
+                title="最新 FINALIZED UTC 日K收盘价，相对 N 个完整 finalized 日线区间前收盘价的累计变化。需要 N+1 根连续 finalized 日K。顶部天数按钮只改这一列和它的排名。连续上涨不截断到 N。"
               />
-              <Th k="streakReturn" label="累计涨幅" title="连涨这段的收盘价累计。不是 N 日累计。" />
+              <Th k="streakReturn" label="累计涨幅" title="连续上涨这段的收盘价累计。不是 N 日累计。" />
               <Th k="streakDrawdown" label="回撤" />
               <Th k="volume24h" label="Volume(24h)" />
               <Th k="liquidity" label="Liquidity" />
@@ -842,11 +917,20 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
               const dev = deviationRatio(anchor, Number.isFinite(dex) ? dex : null);
               const oracleAge = t.oracleUpdatedAt ? now - t.oracleUpdatedAt : null;
               const oracleStale = t.chain === "robinhood" && (oracleAge == null || oracleAge > 2 * CHAINLINK_POLL_PERIOD);
-              const tag = t.halt ? "停牌" : t.marketClosed ? "休市" : t.stale ? "STALE" : "";
-              const klineBadge = () => (t.klineStale ? <span className="mr-1 font-mono text-[10px] text-clay">stale</span> : null);
+              const tag = t.halt ? "停牌" : t.marketClosed ? "休市" : "";
               const kTitle = klineTitle(t, now);
+              const quoteTitle = `报价年龄 ${fmtAge(t.ageSec)}。只影响 Price / 24H，不影响已收盘日K。`;
+              const liqTitle = `流动性年龄 ${t.liquidityAgeSec == null ? "未知" : `${t.liquidityAgeSec}s`}。正式连涨榜要求 ≥$${STREAK_MIN_LIQUIDITY.toLocaleString()} 且 ≤${LIQUIDITY_FRESHNESS_SEC}s。`;
               return (
-                <tr key={keyOf(t)} className={"border-b border-line/50 last:border-b-0 hover:bg-surface/40 " + (t.stale ? "text-muted opacity-60" : "")}>
+                <tr
+                  key={keyOf(t)}
+                  data-symbol={t.symbol || ""}
+                  data-address={t.address}
+                  data-streak={t.streak == null ? "" : String(t.streak)}
+                  data-change-nd={t.changeNd == null ? "" : String(t.changeNd)}
+                  data-daily-status={t.lastDailyStatus ?? ""}
+                  className="border-b border-line/50 last:border-b-0 hover:bg-surface/40"
+                >
                   <td className="px-3 py-2 font-mono text-xs text-muted">{i + 1}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1">
@@ -862,40 +946,56 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
                   <td className="px-3 py-2"><CreatedCell t={t} now={now} /></td>
                   <td className="px-3 py-2"><Sparkline data={t.spark} /></td>
                   <FlashCell value={t.price} armed={t.commitOk && t.chgPrice} className="px-3 py-2 text-right font-mono text-xs">
-                    <span title={`价格 ${fmtAge(t.ageSec)}。这不是日K时间`}>${fmtPrice(t.price)}</span>
+                    <span title={quoteTitle}>
+                      <FieldStale show={t.stale} title={quoteTitle} />
+                      ${fmtPrice(t.price)}
+                    </span>
                   </FlashCell>
                   {columns === "all" && <td className="px-3 py-2 text-right font-mono text-xs">{fmtAge(t.ageSec)}</td>}
                   <td className="px-3 py-2 text-right font-mono text-xs">{fmtUsd(t.marketCap)}</td>
-                  <td className={`px-3 py-2 text-right font-mono text-xs ${pctColor(Number(t.pc24h))}`} title="滚动 24 小时，不是 UTC 日K">
+                  <td className={`px-3 py-2 text-right font-mono text-xs ${pctColor(Number(t.pc24h))}`} title="滚动 24 小时，不是 UTC 日K。新鲜度跟报价走。">
+                    <FieldStale show={t.stale} title={quoteTitle} />
                     {t.pc24h == null ? "—" : fmtPct(Number(t.pc24h))}
                   </td>
-                  <td className={`px-3 py-2 text-right font-mono text-xs ${pctColor(t.change1d)}`} title={kTitle}>
-                    {klineBadge()}{fmtPct(t.change1d)}
+                  <td className={`px-3 py-2 text-right font-mono text-xs ${pctColor(t.change1d)}`} title={kTitle} data-col="change1d">
+                    <DailyStatusTag status={t.lastDailyStatus} />
+                    <FieldStale show={t.klineStale} title={kTitle} />
+                    {fmtPct(t.change1d)}
                   </td>
-                  <td className="px-3 py-2 text-center" title={`${kTitle} 已收盘日K ${t.closedCandles} 根。连涨不受顶部天数按钮影响。`}>
-                    {klineBadge()}
-                    <span className={"font-mono text-sm " + (t.streak > 0 ? "text-moss font-medium" : "text-muted")}>
-                      {t.streak > 0 ? `${t.streak}D` : t.streak}
+                  <td
+                    className="px-3 py-2 text-center"
+                    data-col="streak"
+                    title="连续上涨：截至最后一根 FINALIZED 日 K，连续 close > previous close 的天数。缺数据是 —，明确没涨是 0。与顶部 N 日累计窗口独立。"
+                  >
+                    <DailyStatusTag status={t.lastDailyStatus} />
+                    <FieldStale show={t.klineStale} title={kTitle} />
+                    <span className={"font-mono text-sm " + ((t.streak ?? 0) > 0 ? "text-moss font-medium" : "text-muted")}>
+                      {fmtStreak(t.streak, t.streakStatus)}
                     </span>
                   </td>
                   <td
                     className={`px-3 py-2 text-right font-mono text-xs font-medium ${pctColor(t.changeNd)}`}
-                    title={`${days} 根已收盘 UTC 日K区间的累计。不足 ${days} 个完整区间显示 —。`}
+                    data-col="changeNd"
+                    title={`${days} 个 FINALIZED UTC 日K区间的累计。需要 ${days + 1} 根连续 finalized 日K，否则显示 —。不截断连续上涨。`}
                   >
-                    {klineBadge()}{fmtPct(t.changeNd)}
+                    <DailyStatusTag status={t.lastDailyStatus} />
+                    <FieldStale show={t.klineStale} title={kTitle} />
+                    {fmtPct(t.changeNd)}
                   </td>
-                  <td className={`px-3 py-2 text-right font-mono text-xs ${pctColor(t.streakReturn)}`} title={kTitle}>
-                    {klineBadge()}{fmtPct(t.streakReturn)}
+                  <td className={`px-3 py-2 text-right font-mono text-xs ${pctColor(t.streakReturn)}`} title="连续上涨这段的收盘价累计。不是 N 日累计。">
+                    <FieldStale show={t.klineStale} title={kTitle} />
+                    {fmtPct(t.streakReturn)}
                   </td>
-                  <td className={`px-3 py-2 text-right font-mono text-xs ${drawdownClass(t.streakDrawdown)}`} title={`${kTitle} 超过 40% 仍保留连涨资格`}>
-                    {klineBadge()}{fmtDrawdown(t.streakDrawdown)}
+                  <td className={`px-3 py-2 text-right font-mono text-xs ${drawdownClass(t.streakDrawdown)}`} title={`${kTitle} 超过 40% 仍保留连续上涨资格`}>
+                    <FieldStale show={t.klineStale} title={kTitle} />
+                    {fmtDrawdown(t.streakDrawdown)}
                   </td>
                   <FlashCell value={t.volume24h} armed={t.commitOk && t.chgVolume} className="px-3 py-2 text-right font-mono text-xs">
                     {fmtUsd(t.volume24h)}
                   </FlashCell>
                   <FlashCell value={t.liquidity} armed={t.commitOk && t.chgLiquidity} className="px-3 py-2 text-right font-mono text-xs">
-                    <span title={`流动性 $${STREAK_MIN_LIQUIDITY.toLocaleString()} 且年龄不超过 ${LIQUIDITY_FRESHNESS_SEC}s 才进正式连涨榜。当前年龄 ${t.liquidityAgeSec == null ? "未知" : `${t.liquidityAgeSec}s`}。`}>
-                      {t.stale ? <span className="mr-1 text-[10px] text-clay">stale </span> : null}
+                    <span title={liqTitle}>
+                      <FieldStale show={t.liqStale} title={liqTitle} />
                       {fmtUsd(t.liquidity)}
                     </span>
                   </FlashCell>
@@ -931,7 +1031,7 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
               : board === "streak"
                 ? "正式连涨榜没有流动性不低于 $50,000 且年龄不超过 300 秒的代币"
                 : data && data.length > 0
-                  ? `没有已收盘日K满 ${days + 1} 根的代币，换个更短的天数试试`
+                  ? `没有 ${days + 1} 根连续 finalized 日K的代币，换个更短的天数试试`
                   : "没有数据，先跑采集器"}
           </p>
         )}
@@ -941,7 +1041,7 @@ export function MarketView({ watchOnly = false }: { watchOnly?: boolean }) {
           ? "自选存在这台浏览器。点星标加入或移出。名单不看 $50,000 流动性门槛。掉出当前榜的代币留在这里，并标成不在当前榜。默认按加入顺序。"
           : null}
         {watchOnly ? " " : null}
-        24H：当前价格相对 24 小时前的滚动涨跌幅。日K：最近一根已收盘 UTC 日K，相对前一根已收盘日K的涨跌幅。连涨：连续多少根已收盘 UTC 日K收盘价高于前一日。{days}D累计：最新已收盘 UTC 日K收盘价，相对 {days} 个完整日线区间前收盘价的累计变化。顶部天数只改 N 日累计和全市场按它的排名。正式连涨榜要求流动性不低于 $50,000，且流动性年龄不超过 300 秒。过期的流动性可以留在全市场表里，但不进入正式连涨排名。回撤超过 40% 只标红，不取消连涨。CA 和 Created 不参与排序。Age 是价格源年龄，不是日 K 年龄。
+        {`24H：当前价格相对 24 小时前的滚动涨跌幅，新鲜度跟报价走。日K / 连续上涨 / N日累计只用 FINALIZED 日K（日历已收盘且 fetched_at >= bar.end）。PROVISIONAL 日K保留在库里，不进正式指标。连续上涨与顶部 N 日窗口独立。${days}D累计需要 ${days + 1} 根连续 finalized 日K。stale 只表示今天 UTC 0 点后还没重拉，不等于未定稿。LOW_BASE / EXTREME_RETURN 是质量标签，不改 raw 收益。正式连涨榜要求流动性不低于 $50,000，且流动性年龄不超过 300 秒。回撤超过 40% 只标红，不取消连续上涨。身份是 chain + CA，同名代币靠 CA 区分。Age 是价格源年龄，不是日 K 年龄。`}
       </p>
     </div>
   );

@@ -1,14 +1,32 @@
-/** 连涨口径。只使用已收盘、且在拉取时已经走完的 UTC 日 K。 */
+/** 日 K 定稿、连涨与 N 日累计。market / streak 共用这一份实现。 */
 
 export const DAY_SEC = 86400;
 export const STREAK_MIN_LIQUIDITY = 50_000;
 export const DRAWDOWN_HINT = 0.2;
 export const DRAWDOWN_ALERT = 0.4;
+/** 一次日 K 请求回看多远。与 rh_v2/market_research.py KLINE_FETCH_WINDOW_SEC 相同。 */
+export const KLINE_FETCH_WINDOW_SEC = 100 * DAY_SEC;
 
 /** 市场排行 N 日累计的唯一默认窗口。前端按钮和后端 parse 共用。 */
 export const DEFAULT_DAYS = 7;
 export const PRESET_DAYS = [1, 2, 3, 5, 7, 10, 14, 30] as const;
 export const MAX_CUSTOM_DAYS = 90;
+
+/**
+ * 相邻已收盘日对里，前收低于约 1% 分位（2026-10-02 market.sqlite 实测 p1≈6e-9）。
+ * 只做质量标签，不改 raw return。
+ */
+export const LOW_BASE_CLOSE = 1e-8;
+/**
+ * |return| ≥ 50（5000%）。同库 abs 1D 的 p99.9≈18.7，HEARTH 1D≈292766。
+ * 只做质量标签，不改 raw return。
+ */
+export const EXTREME_ABS_RETURN = 50;
+
+export type DailyStatus = "OPEN" | "PROVISIONAL" | "FINALIZED";
+export type StreakStatus = "POSITIVE_STREAK" | "VALID_ZERO" | "INSUFFICIENT_DATA";
+export type QualityFlag = "LOW_BASE" | "EXTREME_RETURN";
+export type RankWriteChannel = "data" | "error" | "loading" | "eligibility";
 
 export function parseDays(raw: unknown): number {
   const n = typeof raw === "number" ? raw : Number(raw);
@@ -20,75 +38,270 @@ export interface DailyBar {
   ts: number;
   high: number;
   close: number;
+  /** 这一根自己的抓取时间。禁止用 token 级 kline_fetched_at 顶上。 */
+  fetchedAt?: number | null;
+  /** 第一次满足 finalized 条件的时间。可空，定稿可现场算。 */
+  finalizedAt?: number | null;
+  /** 数据源若明确给了 closed/final，优先采信。 */
+  sourceClosed?: boolean | null;
+}
+
+export interface ClassifiedBar extends DailyBar {
+  end: number;
+  status: DailyStatus;
 }
 
 export interface StreakMetrics {
-  streak: number;
-  /** latest closed close / close before the streak − 1. Null when streak is 0. */
+  /** 正式连涨。INSUFFICIENT_DATA 为 null（页面显示 —），VALID_ZERO 为 0。 */
+  streak: number | null;
+  streakStatus: StreakStatus;
+  /** latest finalized close / close before the streak − 1. Null when streak is 0 or unavailable. */
   streakReturn: number | null;
-  /** 1 − latest closed close / max high over the streak candles. Null when streak is 0. */
+  /** 1 − latest finalized close / max high over the streak candles. */
   streakDrawdown: number | null;
-  /** last closed close / previous closed close − 1. Not the rolling 24h change. */
+  /** last finalized close / previous finalized close − 1. */
   change1d: number | null;
   closedCount: number;
+  lastStatus: DailyStatus | null;
+  qualityFlags: QualityFlag[];
 }
 
 export function utcDayStart(now: number): number {
   return now - (now % DAY_SEC);
 }
 
-/** 日 K 在最近一个 UTC 日切之后没有再成功拉取，就不能当成已收盘。 */
-export function klineIsStale(now: number, klineFetchedAt: number | null): boolean {
-  if (klineFetchedAt == null || !Number.isFinite(klineFetchedAt)) return true;
-  return klineFetchedAt < utcDayStart(now);
+export function barEnd(ts: number): number {
+  return ts + DAY_SEC;
 }
 
+export function calendarClosed(bar: { ts: number }, now: number): boolean {
+  return barEnd(bar.ts) <= now;
+}
+
+/**
+ * bar 所在 UTC 日 >= token 创建日。createdAt 只判断代币当时是否存在，
+ * 不参与是否收盘 / 是否定稿。
+ */
+export function barEligibleByCreation(barTs: number, createdAt: number | null): boolean {
+  if (createdAt == null || !Number.isFinite(createdAt) || createdAt <= 0) return true;
+  return barTs >= utcDayStart(createdAt);
+}
+
+/**
+ * 历史日 K 是否 FINALIZED，只由产生/证明这根 bar 的观测时间决定。
+ * observed_at >= bar_end，且 bar 落在该次日 K 请求的回看窗口里。
+ * 读数时刻 now / 迁移时刻不得代入。缺观测时间 → 不能定稿。
+ */
+export function observationProvesFinal(
+  barOpen: number,
+  observedAt: number | null | undefined,
+): boolean {
+  if (observedAt == null || !Number.isFinite(observedAt)) return false;
+  if (observedAt < barOpen + DAY_SEC) return false;
+  if (barOpen < observedAt - KLINE_FETCH_WINDOW_SEC) return false;
+  return true;
+}
+
+/**
+ * OPEN：日历还没收盘（now 只用于这一档）。
+ * FINALIZED：这根 bar 自己的观测时间证明 close 已发生。
+ * PROVISIONAL：日历已过，但没有可证明的观测。
+ * sourceClosed 不能在缺少观测时间时猜定稿。
+ */
+export function barStatus(bar: DailyBar, now: number): DailyStatus {
+  if (barEnd(bar.ts) > now) return "OPEN";
+  if (observationProvesFinal(bar.ts, bar.finalizedAt) || observationProvesFinal(bar.ts, bar.fetchedAt)) {
+    return "FINALIZED";
+  }
+  return "PROVISIONAL";
+}
+
+export function classifyBars(
+  bars: DailyBar[],
+  now: number,
+  createdAt: number | null,
+): ClassifiedBar[] {
+  const byTs = new Map<number, ClassifiedBar>();
+  for (const bar of bars) {
+    if (!Number.isFinite(bar.ts) || !Number.isFinite(bar.close) || bar.close <= 0) continue;
+    if (!barEligibleByCreation(bar.ts, createdAt)) continue;
+    const high = Number.isFinite(bar.high) && bar.high > 0 ? bar.high : bar.close;
+    const classified: ClassifiedBar = {
+      ts: bar.ts,
+      high,
+      close: bar.close,
+      fetchedAt: bar.fetchedAt ?? null,
+      finalizedAt: bar.finalizedAt ?? null,
+      sourceClosed: bar.sourceClosed ?? null,
+      end: barEnd(bar.ts),
+      status: barStatus(bar, now),
+    };
+    byTs.set(bar.ts, classified);
+  }
+  return [...byTs.values()].sort((a, b) => a.ts - b.ts);
+}
+
+export function getFinalizedDailyBars(
+  bars: DailyBar[],
+  now: number,
+  createdAt: number | null,
+): ClassifiedBar[] {
+  return classifyBars(bars, now, createdAt).filter((b) => b.status === "FINALIZED");
+}
+
+/**
+ * 日历已收盘的日 K，含 PROVISIONAL。不从序列里删掉未定稿的 bar。
+ * klineFetchedAt 参数只为兼容旧调用，不参与成员资格。
+ */
 export function closedBars(
   bars: DailyBar[],
   now: number,
   klineFetchedAt: number | null,
   createdAt: number | null,
 ): DailyBar[] {
-  if (klineFetchedAt == null || !Number.isFinite(klineFetchedAt)) return [];
-  const byTs = new Map<number, DailyBar>();
-  for (const bar of bars) {
-    if (!Number.isFinite(bar.ts) || !Number.isFinite(bar.close) || bar.close <= 0) continue;
-    const end = bar.ts + DAY_SEC;
-    if (end > now) continue;
-    if (klineFetchedAt < end) continue;
-    if (createdAt != null && end <= createdAt) continue;
-    const high = Number.isFinite(bar.high) && bar.high > 0 ? bar.high : bar.close;
-    byTs.set(bar.ts, { ts: bar.ts, high, close: bar.close });
-  }
-  return [...byTs.values()].sort((a, b) => a.ts - b.ts);
+  void klineFetchedAt;
+  return classifyBars(bars, now, createdAt).filter((b) => b.status !== "OPEN");
 }
 
-export function streakMetrics(
-  bars: DailyBar[],
-  now: number,
-  klineFetchedAt: number | null,
-  createdAt: number | null,
-): StreakMetrics {
-  const closed = closedBars(bars, now, klineFetchedAt, createdAt);
+export function hasContiguousDays(bars: { ts: number }[], n: number): boolean {
+  if (!Number.isInteger(n) || n < 1) return false;
+  if (bars.length < n + 1) return false;
+  const window = bars.slice(-(n + 1));
+  for (let i = 1; i < window.length; i++) {
+    if (window[i]!.ts - window[i - 1]!.ts !== DAY_SEC) return false;
+  }
+  return true;
+}
+
+/**
+ * 日 K 新鲜度：当前 UTC 日开始之后还没有成功拉取。
+ * 与 finalized 是两条轴。昨天已 FINALIZED 但今天没重拉，仍可标 stale。
+ */
+export function klineIsStale(now: number, klineFetchedAt: number | null): boolean {
+  if (klineFetchedAt == null || !Number.isFinite(klineFetchedAt)) return true;
+  return klineFetchedAt < utcDayStart(now);
+}
+
+/** 快速切换 N 日窗口时，只有最新一次请求能写回。成功 / 失败 / loading / eligibility 都走这里。 */
+export function isCurrentDaysRequest(
+  requestSeq: number,
+  latestSeq: number,
+  requestDays: number,
+  selectedDays: number,
+): boolean {
+  return requestSeq === latestSeq && requestDays === selectedDays;
+}
+
+export function shouldCommitRankWrite(
+  requestSeq: number,
+  latestSeq: number,
+  requestDays: number,
+  selectedDays: number,
+  _channel: RankWriteChannel,
+): boolean {
+  void _channel;
+  return isCurrentDaysRequest(requestSeq, latestSeq, requestDays, selectedDays);
+}
+
+export function streakFromClosed(
+  finalized: { ts: number; close: number }[],
+): { streak: number | null; status: StreakStatus } {
+  if (
+    finalized.length < 2
+    || finalized[finalized.length - 1]!.ts - finalized[finalized.length - 2]!.ts !== DAY_SEC
+  ) {
+    return { streak: null, status: "INSUFFICIENT_DATA" };
+  }
   let streak = 0;
-  for (let i = closed.length - 1; i >= 1; i--) {
-    // 前一天是相邻的 UTC 日。缺一天就停，不能拿更早的收盘价顶上。
-    if (closed[i].ts - closed[i - 1].ts !== DAY_SEC) break;
-    if (closed[i].close > closed[i - 1].close) streak++;
+  for (let i = finalized.length - 1; i >= 1; i--) {
+    if (finalized[i]!.ts - finalized[i - 1]!.ts !== DAY_SEC) break;
+    if (finalized[i]!.close > finalized[i - 1]!.close) streak++;
     else break;
   }
-  // 没有前收就不能记成上涨。1 根已收盘 K 的比较结果是 0，上限仍是根数本身。
-  if (streak > closed.length) streak = closed.length;
+  if (streak >= 1) return { streak, status: "POSITIVE_STREAK" };
+  return { streak: 0, status: "VALID_ZERO" };
+}
 
+/** 与 Python streak_from_closed 相同。缺前一日 → null，明确没涨 → 0。 */
+export function calcStreak(finalized: { ts: number; close: number }[]): number | null {
+  return streakFromClosed(finalized).streak;
+}
+
+export function calcNDayReturn(
+  finalized: { ts: number; close: number }[],
+  n: number,
+): number | null {
+  return returnOverClosedCandles(finalized, n);
+}
+
+function officialAvailable(calendarClosed: ClassifiedBar[]): boolean {
+  const last = calendarClosed[calendarClosed.length - 1];
+  return last != null && last.status === "FINALIZED";
+}
+
+export function qualityFlagsFor(
+  finalized: { ts: number; close: number }[],
+  change1d: number | null,
+  changeNd: number | null,
+  n?: number,
+): QualityFlag[] {
+  const flags = new Set<QualityFlag>();
+  if (finalized.length >= 2) {
+    const prev = finalized[finalized.length - 2]!;
+    const last = finalized[finalized.length - 1]!;
+    if (last.ts - prev.ts === DAY_SEC && prev.close > 0 && prev.close < LOW_BASE_CLOSE) {
+      flags.add("LOW_BASE");
+    }
+  }
+  if (typeof n === "number" && changeNd != null && hasContiguousDays(finalized, n)) {
+    const base = finalized[finalized.length - 1 - n]!.close;
+    if (base > 0 && base < LOW_BASE_CLOSE) flags.add("LOW_BASE");
+  }
+  if (change1d != null && Math.abs(change1d) >= EXTREME_ABS_RETURN) flags.add("EXTREME_RETURN");
+  if (changeNd != null && Math.abs(changeNd) >= EXTREME_ABS_RETURN) flags.add("EXTREME_RETURN");
+  return [...flags];
+}
+
+export function rankingQualityOk(flags: readonly string[]): boolean {
+  return !flags.includes("LOW_BASE") && !flags.includes("EXTREME_RETURN");
+}
+
+export function officialDailyMetrics(
+  bars: DailyBar[],
+  now: number,
+  createdAt: number | null,
+  n: number,
+): StreakMetrics & { changeNd: number | null } {
+  const classified = classifyBars(bars, now, createdAt);
+  const calendar = classified.filter((b) => b.status !== "OPEN");
+  const finalized = classified.filter((b) => b.status === "FINALIZED");
+  const lastStatus = calendar.at(-1)?.status ?? null;
+
+  if (!officialAvailable(calendar)) {
+    const emptyFlags: QualityFlag[] = [];
+    return {
+      streak: null,
+      streakStatus: "INSUFFICIENT_DATA",
+      streakReturn: null,
+      streakDrawdown: null,
+      change1d: null,
+      closedCount: finalized.length,
+      lastStatus,
+      qualityFlags: emptyFlags,
+      changeNd: null,
+    };
+  }
+
+  const { streak, status: streakStatus } = streakFromClosed(finalized);
   let streakReturn: number | null = null;
   let streakDrawdown: number | null = null;
-  if (streak >= 1) {
-    const base = closed[closed.length - 1 - streak];
-    const latest = closed[closed.length - 1];
+  if (streak != null && streak >= 1) {
+    const base = finalized[finalized.length - 1 - streak];
+    const latest = finalized[finalized.length - 1]!;
     if (base && base.close > 0) streakReturn = latest.close / base.close - 1;
     let high = 0;
-    for (let i = closed.length - streak; i < closed.length; i++) {
-      if (closed[i].high > high) high = closed[i].high;
+    for (let i = finalized.length - streak; i < finalized.length; i++) {
+      if (finalized[i]!.high > high) high = finalized[i]!.high;
     }
     if (high > 0) {
       const dd = 1 - latest.close / high;
@@ -97,20 +310,46 @@ export function streakMetrics(
   }
 
   let change1d: number | null = null;
-  if (closed.length >= 2) {
-    const prevBar = closed[closed.length - 2];
-    const lastBar = closed[closed.length - 1];
+  if (finalized.length >= 2) {
+    const prevBar = finalized[finalized.length - 2]!;
+    const lastBar = finalized[finalized.length - 1]!;
     if (lastBar.ts - prevBar.ts === DAY_SEC && prevBar.close > 0) {
       change1d = lastBar.close / prevBar.close - 1;
     }
   }
 
+  const changeNd = calcNDayReturn(finalized, n);
+  const qualityFlags = qualityFlagsFor(finalized, change1d, changeNd, n);
   return {
     streak,
+    streakStatus,
     streakReturn,
     streakDrawdown,
     change1d,
-    closedCount: closed.length,
+    closedCount: finalized.length,
+    lastStatus,
+    qualityFlags,
+    changeNd,
+  };
+}
+
+export function streakMetrics(
+  bars: DailyBar[],
+  now: number,
+  klineFetchedAt: number | null,
+  createdAt: number | null,
+): StreakMetrics {
+  void klineFetchedAt;
+  const m = officialDailyMetrics(bars, now, createdAt, 1);
+  return {
+    streak: m.streak,
+    streakStatus: m.streakStatus,
+    streakReturn: m.streakReturn,
+    streakDrawdown: m.streakDrawdown,
+    change1d: m.change1d,
+    closedCount: m.closedCount,
+    lastStatus: m.lastStatus,
+    qualityFlags: m.qualityFlags,
   };
 }
 
@@ -133,13 +372,14 @@ export function formalStreakEligible(
 }
 
 /**
- * return_Nd = 最近一根已收盘 close / 向前第 N 根连续已收盘日 K 的 close − 1。
- * 窗口里缺任何一根返回 null，不返回 0。
+ * return_Nd = 最近一根已定稿 close / 向前第 N 根连续已定稿日 K 的 close − 1。
+ * 窗口里缺任何一根返回 null，不返回 0。不在这里封顶或改数。
  */
 export function returnOverClosedCandles(
   closed: { ts: number; close: number }[],
   n: number,
 ): number | null {
+  if (!Number.isInteger(n) || n < 1) return null;
   if (closed.length < n + 1) return null;
   const window = closed.slice(-(n + 1));
   for (let i = 1; i < window.length; i++) {
@@ -151,14 +391,18 @@ export function returnOverClosedCandles(
   return last / base - 1;
 }
 
-/** 连涨天数优先，累计涨幅只作同天数里的次序。方向同时作用于两个键。 */
+/** 连涨天数优先，累计涨幅只作同天数里的次序。方向同时作用于两个键。null 排最后。 */
 export function compareStreakThenReturn(
-  a: { streak: number; streakReturn: number | null },
-  b: { streak: number; streakReturn: number | null },
+  a: { streak: number | null; streakReturn: number | null },
+  b: { streak: number | null; streakReturn: number | null },
   dir: "desc" | "asc" = "desc",
 ): number {
   const sign = dir === "desc" ? 1 : -1;
-  if (a.streak !== b.streak) return (b.streak - a.streak) * sign;
+  if (a.streak == null && b.streak == null) {
+    /* fall through to return */
+  } else if (a.streak == null) return 1;
+  else if (b.streak == null) return -1;
+  else if (a.streak !== b.streak) return (b.streak - a.streak) * sign;
   if (a.streakReturn == null && b.streakReturn == null) return 0;
   if (a.streakReturn == null) return 1;
   if (b.streakReturn == null) return -1;

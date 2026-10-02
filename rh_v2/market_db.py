@@ -35,11 +35,14 @@ CREATE TABLE IF NOT EXISTS hourly_price (
 CREATE INDEX IF NOT EXISTS ix_hp_addr_ts ON hourly_price(address, ts);
 
 -- 日 K 线（用于连涨天数）。ts 是当日 UTC 00:00。
+-- fetched_at / finalized_at 是这一根自己的时间，禁止用 token 级 kline_fetched_at 顶上。
 CREATE TABLE IF NOT EXISTS daily_kline (
     chain   TEXT NOT NULL,
     address TEXT NOT NULL,
     ts      INTEGER NOT NULL,
-    open    TEXT, high TEXT, low TEXT, close TEXT, volume TEXT,
+    open    TEXT, high TEXT, low TEXT, close TEXT, volume TEXT, amount TEXT,
+    fetched_at INTEGER,
+    finalized_at INTEGER,
     PRIMARY KEY (chain, address, ts)
 );
 CREATE INDEX IF NOT EXISTS ix_dk_addr_ts ON daily_kline(address, ts);
@@ -151,10 +154,13 @@ CREATE TABLE IF NOT EXISTS token_candle (
     low REAL,
     close REAL,
     volume REAL,
+    amount REAL,
     fetched_at INTEGER,
+    finalized_at INTEGER,
     is_closed INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (chain, address, candle_open_ts)
 );
+CREATE INDEX IF NOT EXISTS ix_tc_open ON token_candle(chain, candle_open_ts, fetched_at);
 
 CREATE TABLE IF NOT EXISTS daily_metrics (
     chain TEXT NOT NULL,

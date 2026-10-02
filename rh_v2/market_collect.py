@@ -122,7 +122,7 @@ def upsert_daily_kline(con, chain, address, now):
     空响应、非法行、请求失败都不算完成。请求失败由调用方安排重试。
     """
     import market_research as research
-    rows = fetch_kline(chain, address, "1d", now - 100 * 86400, now)
+    rows = fetch_kline(chain, address, "1d", now - research.KLINE_FETCH_WINDOW_SEC, now)
     parsed_ok = isinstance(rows, list)
     return research.commit_kline_fetch(con, chain, address, rows if parsed_ok else [], now, parsed_ok)
 

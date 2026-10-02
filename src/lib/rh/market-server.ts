@@ -5,15 +5,26 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  closedBars,
   displayCreated,
+  formalStreakEligible,
+  officialDailyMetrics,
   parseDays,
-  returnOverClosedCandles,
   streakBoardEligible,
-  streakMetrics,
   STREAK_MIN_LIQUIDITY,
   type DailyBar,
+  type DailyStatus,
+  type QualityFlag,
+  type StreakStatus,
 } from "./streak.ts";
+
+export interface MarketEligibility {
+  days: number;
+  registry: number;
+  enoughCandleHistory: number;
+  liquidityQualified: number;
+  freshQualified: number;
+  finalEligible: number;
+}
 
 const DB_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -39,12 +50,15 @@ interface RankedToken {
   liquidity: string;
   marketCap: string;
   holders: number | null;
-  changeNd: number | null; // 已收盘 UTC 日 K 的 N 日累计。不是滚动 24H，也不是日K
-  change1d: number | null; // 日K：最近两根已收盘日 K 的收盘比。closed_daily_change
-  streak: number;
+  changeNd: number | null; // 已定稿 UTC 日 K 的 N 日累计。不是滚动 24H，也不是日K
+  change1d: number | null; // 日K：最近两根已定稿日 K 的收盘比。closed_daily_change
+  streak: number | null;
+  streakStatus: StreakStatus;
   streakReturn: number | null;
   streakDrawdown: number | null;
   closedCandles: number;
+  lastDailyStatus: DailyStatus | null;
+  qualityFlags: QualityFlag[];
   spark: number[] | null; // 最近 24 个整点美元价
   priceDs: string | null;
   volumeDs: string | null;
@@ -114,13 +128,23 @@ function readGmgnClocks(db: DatabaseSync): Record<string, GmgnClock> {
   return out;
 }
 
+function dailyKlineHasFetchedAt(db: DatabaseSync): boolean {
+  const cols = db.prepare("PRAGMA table_info(daily_kline)").all() as unknown as { name: string }[];
+  return cols.some((c) => c.name === "fetched_at");
+}
+
 function loadDailyBars(db: DatabaseSync): Map<string, DailyBar[]> {
-  const rows = db.prepare("SELECT chain, address, ts, high, close FROM daily_kline").all() as unknown as {
+  const sql = dailyKlineHasFetchedAt(db)
+    ? "SELECT chain, address, ts, high, close, fetched_at, finalized_at FROM daily_kline"
+    : "SELECT chain, address, ts, high, close, NULL AS fetched_at, NULL AS finalized_at FROM daily_kline";
+  const rows = db.prepare(sql).all() as unknown as {
     chain: string;
     address: string;
     ts: number;
     high: string | null;
     close: string | null;
+    fetched_at: number | null;
+    finalized_at: number | null;
   }[];
   const out = new Map<string, DailyBar[]>();
   for (const row of rows) {
@@ -130,7 +154,13 @@ function loadDailyBars(db: DatabaseSync): Map<string, DailyBar[]> {
       list = [];
       out.set(key, list);
     }
-    list.push({ ts: row.ts, high: Number(row.high), close: Number(row.close) });
+    list.push({
+      ts: row.ts,
+      high: Number(row.high),
+      close: Number(row.close),
+      fetchedAt: row.fetched_at ?? null,
+      finalizedAt: row.finalized_at ?? null,
+    });
   }
   return out;
 }
@@ -162,12 +192,24 @@ function readMaxPriceTs(db: DatabaseSync): number | null {
   return row?.ts ?? null;
 }
 
+function emptyEligibility(days: number, registry = 0): MarketEligibility {
+  return {
+    days,
+    registry,
+    enoughCandleHistory: 0,
+    liquidityQualified: 0,
+    freshQualified: 0,
+    finalEligible: 0,
+  };
+}
+
 export const fetchMarketRank = createServerFn({ method: "POST" })
   .validator(z.object({ days: z.unknown().optional(), keys: z.array(z.string()).max(2000).optional() }))
   .handler(async ({ data }): Promise<{
     ok: boolean;
     tokens: RankedToken[];
     days?: number;
+    eligibility?: MarketEligibility;
     /** 名册总数。没下发的是日K不足 N+1 根、池深也不到连涨门槛的币。 */
     registryCount?: number;
     lastMarketUpdate?: string | null;
@@ -190,6 +232,7 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
         "SELECT price FROM hourly_price WHERE chain=? AND address=? AND ts >= ? ORDER BY ts ASC",
       );
       const registryCount = (db.prepare("SELECT COUNT(*) AS n FROM token_registry").get() as { n: number }).n;
+      const eligibility = emptyEligibility(days, registryCount);
 
       const tokens = db
         .prepare(
@@ -269,21 +312,19 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
         const pairCreatedAt = t.pair_created_at ?? null;
         const created = displayCreated(tokenCreatedAt, pairCreatedAt);
         const tokenBars = bars.get(`${t.chain}:${t.address}`) ?? [];
-        const metrics = streakMetrics(
-          tokenBars,
-          now,
-          t.kline_fetched_at ?? null,
-          created.at,
-        );
-        const closed = closedBars(
-          tokenBars,
-          now,
-          t.kline_fetched_at ?? null,
-          created.at,
-        );
-        const changeNd = returnOverClosedCandles(closed, days);
+        const metrics = officialDailyMetrics(tokenBars, now, created.at, days);
+        const changeNd = metrics.changeNd;
+        const liq = t.liquidity_num ?? t.liquidity;
+        const liqAge = t.liquidity_updated_at == null ? null : now - t.liquidity_updated_at;
+        if (changeNd != null) {
+          eligibility.enoughCandleHistory += 1;
+          if (streakBoardEligible(liq)) {
+            eligibility.liquidityQualified += 1;
+            if (formalStreakEligible(liq, liqAge)) eligibility.freshQualified += 1;
+          }
+        }
         // 全市场榜要 N 日累计，连涨榜要流动性门槛；两样都不沾的不下发。自选不过滤。
-        if (!watch && changeNd == null && !streakBoardEligible(t.liquidity_num ?? t.liquidity)) continue;
+        if (!watch && changeNd == null && !streakBoardEligible(liq) && metrics.streak == null) continue;
         ranked.push({
           chain: t.chain,
           address: t.address,
@@ -309,9 +350,12 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
           changeNd,
           change1d: metrics.change1d,
           streak: metrics.streak,
+          streakStatus: metrics.streakStatus,
           streakReturn: metrics.streakReturn,
           streakDrawdown: metrics.streakDrawdown,
           closedCandles: metrics.closedCount,
+          lastDailyStatus: metrics.lastStatus,
+          qualityFlags: metrics.qualityFlags,
           spark: sparkline(sparkStmt, t.chain, t.address, now),
           priceDs: t.price_ds,
           volumeDs: t.volume_ds,
@@ -357,11 +401,13 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
       const lastKlineUpdate = readMeta(db, "last_kline_update");
       const gmgn = readGmgnClocks(db);
       db.close();
+      eligibility.finalEligible = eligibility.enoughCandleHistory;
 
       return {
         ok: true,
         tokens: ranked,
         days,
+        eligibility,
         registryCount,
         lastMarketUpdate,
         lastPriceUpdate,

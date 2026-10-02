@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { ArrowUp, ArrowDown, Minus, Trash2, FileJson, RefreshCw, Database } from "lucide-react";
 import { fetchKlineBoard } from "@/lib/rh/kline-server";
+import { calcStreak, officialDailyMetrics, type DailyBar } from "@/lib/rh/streak";
 
 interface Candle {
   ts: number;
@@ -18,10 +19,11 @@ interface TokenStreak {
   label: string | null;
   days: number;
   pattern: string;
-  upDays: number;
+  upDays: number | null;
   downDays: number;
   flatDays: number;
   latestClose: string;
+  lastStatus?: string | null;
   candles: Candle[];
 }
 
@@ -106,8 +108,8 @@ function TokenDetail({ token, days }: { token: TokenStreak; days: number }) {
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-lg border border-line bg-surface p-3 text-center">
           <p className="font-mono text-xs text-muted">连涨</p>
-          <p className={`mt-1 text-2xl font-mono font-medium ${run("+") > 0 ? "text-moss" : "text-muted"}`}>
-            {run("+")}
+          <p className={`mt-1 text-2xl font-mono font-medium ${(token.upDays ?? 0) > 0 ? "text-moss" : "text-muted"}`}>
+            {token.upDays == null ? "—" : token.upDays}
           </p>
         </div>
         <div className="rounded-lg border border-line bg-surface p-3 text-center">
@@ -201,12 +203,25 @@ function JsonMode() {
         }
       }
       candles.sort((a, b) => a.ts - b.ts);
-      const used = keepForming ? candles : candles.slice(0, -1);
+      const now = Math.floor(Date.now() / 1000);
+      const bars: DailyBar[] = candles.map((c) => {
+        const ts = c.ts - (c.ts % 86400);
+        const end = ts + 86400;
+        return {
+          ts,
+          close: Number(c.close),
+          high: Number(c.close),
+          // 粘贴的历史 K 视为源在 bar_end 给出的收盘，不用粘贴时刻冒充观测。
+          fetchedAt: end <= now ? end : now,
+        };
+      });
+      const official = officialDailyMetrics(bars, now, null, 1);
+      const used = keepForming ? bars : bars.filter((b) => b.ts + 86400 <= now);
       if (used.length < 2) throw new Error("不足 2 根");
       const marks: string[] = [];
       for (let i = 1; i < used.length; i++) {
-        const p = Number(used[i - 1].close);
-        const c = Number(used[i].close);
+        const p = used[i - 1]!.close;
+        const c = used[i]!.close;
         marks.push(c > p ? "+" : c < p ? "-" : "=");
       }
       const run = (t: string) => {
@@ -217,7 +232,14 @@ function JsonMode() {
         }
         return c;
       };
-      return { pattern: marks.join(""), upDays: run("+"), downDays: run("-"), days: used.length };
+      return {
+        pattern: marks.join(""),
+        upDays: official.streak,
+        downDays: run("-"),
+        days: used.length,
+        lastStatus: official.lastStatus,
+        previewUp: calcStreak(used),
+      };
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       return null;
@@ -261,8 +283,8 @@ function JsonMode() {
         <div className="grid grid-cols-4 gap-3">
           <div className="rounded-lg border border-line bg-surface p-3 text-center">
             <p className="font-mono text-xs text-muted">连涨</p>
-            <p className={`mt-1 text-2xl font-mono ${result.upDays > 0 ? "text-moss" : "text-muted"}`}>
-              {result.upDays}
+            <p className={`mt-1 text-2xl font-mono ${(result.upDays ?? 0) > 0 ? "text-moss" : "text-muted"}`}>
+              {result.upDays == null ? "—" : result.upDays}
             </p>
           </div>
           <div className="rounded-lg border border-line bg-surface p-3 text-center">
@@ -391,12 +413,13 @@ export function StreakView() {
                         >
                           <td className="px-4 py-2">
                             <span className="block truncate font-medium">{t.label || shortAddr(t.address)}</span>
+                            <span className="block truncate font-mono text-[10px] text-muted" title={t.address}>{shortAddr(t.address)}</span>
                           </td>
                           <td className="px-4 py-2 font-mono text-xs text-muted">{t.chain}</td>
                           <td className="whitespace-nowrap px-4 py-2 font-mono text-xs text-right">{t.latestClose}</td>
                           <td className="px-4 py-2 text-center">
-                            <span className={t.upDays > 0 ? "font-mono font-medium text-moss" : "font-mono text-muted"}>
-                              {t.upDays}
+                            <span className={(t.upDays ?? 0) > 0 ? "font-mono font-medium text-moss" : "font-mono text-muted"}>
+                              {t.upDays == null ? "—" : t.upDays}
                             </span>
                           </td>
                           <td className="px-4 py-2 text-center">

@@ -3,25 +3,50 @@ import { describe, it } from "node:test";
 import {
   DAY_SEC,
   DEFAULT_DAYS,
+  EXTREME_ABS_RETURN,
+  LOW_BASE_CLOSE,
   PRESET_DAYS,
   anchorDeviation,
+  barEligibleByCreation,
+  barStatus,
+  calcNDayReturn,
+  calcStreak,
+  classifyBars,
+  observationProvesFinal,
+  streakFromClosed,
   closedBars,
   compareStreakThenReturn,
   displayCreated,
   fmtRelativeAge,
   formalStreakEligible,
+  getFinalizedDailyBars,
+  hasContiguousDays,
+  isCurrentDaysRequest,
   klineIsStale,
+  KLINE_FETCH_WINDOW_SEC,
+  officialDailyMetrics,
   parseDays,
+  qualityFlagsFor,
+  rankingQualityOk,
   returnOverClosedCandles,
+  shouldCommitRankWrite,
   streakBoardEligible,
   streakMetrics,
   type DailyBar,
+  type RankWriteChannel,
 } from "./streak.ts";
 
 const DAY0 = 1_790_000_000 - (1_790_000_000 % DAY_SEC);
 
-function bar(dayIndex: number, close: number, high = close): DailyBar {
-  return { ts: DAY0 + dayIndex * DAY_SEC, close, high };
+function bar(
+  dayIndex: number,
+  close: number,
+  high = close,
+  fetchedAt: number | null | undefined = undefined,
+): DailyBar {
+  const ts = DAY0 + dayIndex * DAY_SEC;
+  const end = ts + DAY_SEC;
+  return { ts, close, high, fetchedAt: fetchedAt === undefined ? end : fetchedAt };
 }
 
 describe("streakMetrics", () => {
@@ -66,32 +91,36 @@ describe("streakMetrics", () => {
     const bars = [bar(0, 0.001, 0.002), bar(3, 1, 2), bar(4, 20, 40)];
     const m = streakMetrics(bars, now, fetched, created);
     assert.equal(m.closedCount, 1);
-    assert.equal(m.streak, 0);
+    assert.equal(m.streak, null);
+    assert.equal(m.streakStatus, "INSUFFICIENT_DATA");
     assert.equal(m.streakReturn, null);
     assert.equal(m.change1d, null);
   });
 
-  it("drops a candle fetched before that day closed", () => {
+  it("stale fetch does not drop a finalized calendar-closed candle", () => {
     const bars = [bar(0, 1), bar(1, 2), bar(2, 3)];
     const fetchedEarly = DAY0 + 2 * DAY_SEC - 10;
     const m = streakMetrics(bars, now, fetchedEarly, null);
-    assert.equal(m.closedCount, 1);
-    assert.equal(m.streak, 0);
+    assert.equal(m.closedCount, 3);
+    assert.equal(m.streak, 2);
+    assert.equal(m.lastStatus, "FINALIZED");
     assert.equal(klineIsStale(now, fetchedEarly), true);
     assert.equal(klineIsStale(now, fetched), false);
   });
 
-  it("returns nothing when the daily fetch time is unknown", () => {
+  it("still uses per-bar fetchedAt when token-level fetch time is unknown", () => {
     const m = streakMetrics([bar(0, 1), bar(1, 2)], now, null, null);
-    assert.equal(m.streak, 0);
-    assert.equal(m.closedCount, 0);
+    assert.equal(m.closedCount, 2);
+    assert.equal(m.streak, 1);
+    assert.equal(klineIsStale(now, null), true);
   });
 
   it("stops when the previous calendar day is missing", () => {
     const bars = [bar(0, 1), bar(1, 1.2), bar(3, 2)];
     const m = streakMetrics(bars, now, fetched, null);
     assert.equal(m.closedCount, 3);
-    assert.equal(m.streak, 0);
+    assert.equal(m.streak, null);
+    assert.equal(m.streakStatus, "INSUFFICIENT_DATA");
     assert.equal(m.streakReturn, null);
     assert.equal(m.change1d, null);
   });
@@ -102,7 +131,7 @@ describe("streakMetrics", () => {
     assert.equal(m.streak, 1);
     assert.ok(Math.abs((m.streakReturn ?? 0) - (1.4 / 1.1 - 1)) < 1e-12);
     assert.ok(Math.abs((m.change1d ?? 0) - (1.4 / 1.1 - 1)) < 1e-12);
-    assert.ok(m.streak <= m.closedCount);
+    assert.ok((m.streak ?? 0) <= m.closedCount);
   });
 
   it("drawdown above 40% stays a streak", () => {
@@ -122,6 +151,16 @@ describe("board rules", () => {
     ];
     const sorted = [...rows].sort((a, b) => compareStreakThenReturn(a, b));
     assert.deepEqual(sorted.map((r) => r.streakReturn), [0.5, 0.2, 3]);
+  });
+
+  it("sorts unavailable streak after numeric streaks", () => {
+    const rows = [
+      { streak: null, streakReturn: 9 },
+      { streak: 0, streakReturn: null },
+      { streak: 1, streakReturn: 0.1 },
+    ];
+    const sorted = [...rows].sort((a, b) => compareStreakThenReturn(a, b));
+    assert.deepEqual(sorted.map((r) => r.streak), [1, 0, null]);
   });
 
   it("liquidity is a gate, not a score", () => {
@@ -194,9 +233,375 @@ describe("board rules", () => {
     assert.equal(anchorDeviation(null, 100), null);
   });
 
-  it("ignores bars that ended before the token or the pair existed", () => {
+  it("ignores bars whose UTC day is before the token creation day", () => {
     const created = DAY0 + 2 * DAY_SEC + 10;
     const kept = closedBars([bar(0, 1), bar(1, 2), bar(2, 3)], DAY0 + 4 * DAY_SEC, DAY0 + 4 * DAY_SEC, created);
     assert.deepEqual(kept.map((b) => b.close), [3]);
+    assert.equal(barEligibleByCreation(DAY0 + DAY_SEC, created), false);
+    assert.equal(barEligibleByCreation(DAY0 + 2 * DAY_SEC, created), true);
+  });
+});
+
+describe("N-day window vs consecutive-up streak", () => {
+  it("CASE 1: 6-day up streak with selectedDays=5 keeps streak=6 and a 5D return", () => {
+    const now = DAY0 + 7 * DAY_SEC + 3600;
+    const fetched = DAY0 + 7 * DAY_SEC + 10;
+    const bars = [
+      bar(0, 1.0),
+      bar(1, 1.1),
+      bar(2, 1.2),
+      bar(3, 1.3),
+      bar(4, 1.4),
+      bar(5, 1.5),
+      bar(6, 1.6),
+      bar(7, 9.9),
+    ];
+    const finalized = getFinalizedDailyBars(bars, now, null);
+    const m = streakMetrics(bars, now, fetched, null);
+    const selectedDays = 5;
+    const ret5 = calcNDayReturn(finalized, selectedDays);
+    assert.equal(m.streak, 6);
+    assert.notEqual(m.streak, selectedDays);
+    assert.ok((m.streak ?? 0) > selectedDays);
+    assert.ok(Math.abs((ret5 ?? 0) - (1.6 / 1.1 - 1)) < 1e-12);
+    assert.equal(finalized.at(-1)?.close, 1.6);
+  });
+
+  it("CASE 2: up up down up up → streak=2", () => {
+    const now = DAY0 + 6 * DAY_SEC + 3600;
+    const fetched = DAY0 + 6 * DAY_SEC + 10;
+    const bars = [bar(0, 1.0), bar(1, 1.1), bar(2, 1.2), bar(3, 1.0), bar(4, 1.1), bar(5, 1.2)];
+    const m = streakMetrics(bars, now, fetched, null);
+    assert.equal(m.streak, 2);
+  });
+
+  it("CASE 3: unfinished huge up day does not change streak", () => {
+    const now = DAY0 + 2 * DAY_SEC + 3600;
+    const fetched = now;
+    const bars = [bar(0, 1.0), bar(1, 1.1), bar(2, 50)];
+    const m = streakMetrics(bars, now, fetched, null);
+    const closed = closedBars(bars, now, fetched, null);
+    assert.deepEqual(closed.map((b) => b.close), [1.0, 1.1]);
+    assert.equal(m.streak, 1);
+    assert.ok(Math.abs((m.change1d ?? 0) - 0.1) < 1e-12);
+    assert.equal(barStatus(bars[2]!, now), "OPEN");
+  });
+
+  it("CASE 4: only 5 finalized bars makes 5D cumulative unavailable", () => {
+    const now = DAY0 + 5 * DAY_SEC + 3600;
+    const fetched = now;
+    const bars = [bar(0, 1), bar(1, 1.1), bar(2, 1.2), bar(3, 1.3), bar(4, 1.4)];
+    const finalized = getFinalizedDailyBars(bars, now, null);
+    assert.equal(finalized.length, 5);
+    assert.equal(hasContiguousDays(finalized, 5), false);
+    assert.equal(calcNDayReturn(finalized, 5), null);
+    assert.ok(calcNDayReturn(finalized, 4) != null);
+  });
+
+  it("CASE 5: equal close terminates streak", () => {
+    const now = DAY0 + 3 * DAY_SEC + 3600;
+    const fetched = now;
+    const bars = [bar(0, 1.0), bar(1, 1.2), bar(2, 1.2), bar(3, 1.2)];
+    const m = streakMetrics(bars, now, fetched, null);
+    assert.equal(m.streak, 0);
+    assert.equal(m.streakStatus, "VALID_ZERO");
+    assert.equal(m.streakReturn, null);
+  });
+
+  it("CASE 6: an older days request must not apply after a newer one", () => {
+    let latest = 0;
+    const selected = { days: 1 };
+    const apply = (seq: number, requestDays: number) => {
+      if (!isCurrentDaysRequest(seq, latest, requestDays, selected.days)) return false;
+      return true;
+    };
+    const first = ++latest;
+    selected.days = 1;
+    const second = ++latest;
+    selected.days = 30;
+    const third = ++latest;
+    selected.days = 3;
+    const fourth = ++latest;
+    selected.days = 14;
+    const fifth = ++latest;
+    selected.days = 5;
+    assert.equal(apply(first, 1), false);
+    assert.equal(apply(second, 30), false);
+    assert.equal(apply(third, 3), false);
+    assert.equal(apply(fourth, 14), false);
+    assert.equal(apply(fifth, 5), true);
+    assert.equal(isCurrentDaysRequest(fifth, latest, 5, 5), true);
+    assert.equal(isCurrentDaysRequest(fifth, latest, 14, 5), false);
+  });
+});
+
+describe("finalization contract", () => {
+  it("CASE 7: calendar closed with fetched_at < bar.end is PROVISIONAL and stays in the series", () => {
+    const now = DAY0 + 3 * DAY_SEC + 3600;
+    const bars = [
+      bar(0, 1),
+      bar(1, 1.2),
+      bar(2, 1.5, 1.5, DAY0 + 2 * DAY_SEC + 12 * 3600),
+    ];
+    const classified = classifyBars(bars, now, null);
+    assert.equal(classified[2]!.status, "PROVISIONAL");
+    assert.equal(barStatus(bars[2]!, now), "PROVISIONAL");
+    const calendar = closedBars(bars, now, null, null);
+    assert.equal(calendar.length, 3);
+    const m = officialDailyMetrics(bars, now, null, 2);
+    assert.equal(m.lastStatus, "PROVISIONAL");
+    assert.equal(m.streak, null);
+    assert.equal(m.changeNd, null);
+    assert.equal(m.change1d, null);
+  });
+
+  it("CASE 8: the same bar becomes FINALIZED after a post-close refetch", () => {
+    const now = DAY0 + 3 * DAY_SEC + 3600;
+    const bars = [
+      bar(0, 1),
+      bar(1, 1.2),
+      bar(2, 1.5, 1.5, DAY0 + 3 * DAY_SEC + 120),
+    ];
+    assert.equal(barStatus(bars[2]!, now), "FINALIZED");
+    const m = officialDailyMetrics(bars, now, null, 2);
+    assert.equal(m.lastStatus, "FINALIZED");
+    assert.equal(m.streak, 2);
+    assert.ok(Math.abs((m.changeNd ?? 0) - (1.5 / 1 - 1)) < 1e-12);
+  });
+
+  it("CASE 9: one provisional bar inside a 5D window makes 5D null", () => {
+    const now = DAY0 + 6 * DAY_SEC + 3600;
+    const bars = [
+      bar(0, 1),
+      bar(1, 1.1),
+      bar(2, 1.2, 1.2, DAY0 + 2 * DAY_SEC + 100),
+      bar(3, 1.3),
+      bar(4, 1.4),
+      bar(5, 1.5),
+    ];
+    const m = officialDailyMetrics(bars, now, null, 5);
+    assert.equal(m.lastStatus, "FINALIZED");
+    assert.equal(m.changeNd, null);
+    assert.ok(m.streak != null);
+  });
+
+  it("CASE 10: a provisional tail is not the official last bar", () => {
+    const now = DAY0 + 4 * DAY_SEC + 3600;
+    const bars = [
+      bar(0, 1),
+      bar(1, 1.2),
+      bar(2, 1.4),
+      bar(3, 1.8, 1.8, DAY0 + 3 * DAY_SEC + 100),
+    ];
+    const m = officialDailyMetrics(bars, now, null, 3);
+    assert.equal(m.lastStatus, "PROVISIONAL");
+    assert.equal(m.streak, null);
+    assert.equal(m.changeNd, null);
+    assert.equal(getFinalizedDailyBars(bars, now, null).at(-1)?.close, 1.4);
+    assert.equal(calcStreak(getFinalizedDailyBars(bars, now, null)), 2);
+  });
+
+  it("CASE 11: bars before the token creation day are dropped", () => {
+    const now = DAY0 + 4 * DAY_SEC + 3600;
+    const created = DAY0 + 2 * DAY_SEC + 100;
+    const bars = [bar(0, 1), bar(1, 2), bar(2, 3), bar(3, 4)];
+    const m = officialDailyMetrics(bars, now, created, 3);
+    assert.equal(m.closedCount, 2);
+    assert.equal(m.streak, 1);
+    assert.equal(calcNDayReturn(getFinalizedDailyBars(bars, now, created), 3), null);
+  });
+
+  it("CASE 12: market and streak share calcStreak on the same bars", () => {
+    const now = DAY0 + 5 * DAY_SEC + 3600;
+    const bars = [bar(0, 1), bar(1, 1.1), bar(2, 1.05), bar(3, 1.2), bar(4, 1.3)];
+    const market = officialDailyMetrics(bars, now, null, 5);
+    const streakBoard = calcStreak(getFinalizedDailyBars(bars, now, null));
+    assert.equal(market.streak, streakBoard);
+    assert.equal(market.streak, 2);
+  });
+});
+
+describe("rank request seq covers every write channel", () => {
+  function applyAll(
+    seq: number,
+    latest: number,
+    requestDays: number,
+    selectedDays: number,
+  ): Record<RankWriteChannel, boolean> {
+    const channels: RankWriteChannel[] = ["data", "error", "loading", "eligibility"];
+    const out = {} as Record<RankWriteChannel, boolean>;
+    for (const ch of channels) {
+      out[ch] = shouldCommitRankWrite(seq, latest, requestDays, selectedDays, ch);
+    }
+    return out;
+  }
+
+  it("old success does not overwrite a newer success", () => {
+    const latest = 2;
+    assert.equal(shouldCommitRankWrite(1, latest, 1, 5, "data"), false);
+    assert.equal(shouldCommitRankWrite(2, latest, 5, 5, "data"), true);
+  });
+
+  it("old failure does not overwrite a newer success", () => {
+    const latest = 2;
+    const staleFail = applyAll(1, latest, 1, 5);
+    const freshOk = applyAll(2, latest, 5, 5);
+    assert.deepEqual(staleFail, { data: false, error: false, loading: false, eligibility: false });
+    assert.deepEqual(freshOk, { data: true, error: true, loading: true, eligibility: true });
+  });
+
+  it("old success does not overwrite a newer failure", () => {
+    const latest = 2;
+    assert.equal(shouldCommitRankWrite(1, latest, 7, 3, "data"), false);
+    assert.equal(shouldCommitRankWrite(2, latest, 3, 3, "error"), true);
+    assert.equal(shouldCommitRankWrite(2, latest, 3, 3, "eligibility"), true);
+    assert.equal(shouldCommitRankWrite(2, latest, 3, 3, "loading"), true);
+  });
+});
+
+describe("quality flags do not rewrite raw returns", () => {
+  it("marks LOW_BASE and EXTREME_RETURN and leaves the ratio intact", () => {
+    const now = DAY0 + 2 * DAY_SEC + 3600;
+    const bars = [bar(0, LOW_BASE_CLOSE / 10), bar(1, 1)];
+    const m = officialDailyMetrics(bars, now, null, 1);
+    const raw = 1 / (LOW_BASE_CLOSE / 10) - 1;
+    assert.ok(Math.abs((m.changeNd ?? 0) - raw) < 1e-6);
+    assert.ok(m.qualityFlags.includes("LOW_BASE"));
+    assert.ok(m.qualityFlags.includes("EXTREME_RETURN"));
+    assert.equal(rankingQualityOk(m.qualityFlags), false);
+    assert.ok(raw > EXTREME_ABS_RETURN);
+    assert.deepEqual(qualityFlagsFor(bars, raw, raw, 1).sort(), ["EXTREME_RETURN", "LOW_BASE"]);
+  });
+});
+
+describe("observation timestamp is the only finalized proof", () => {
+  const ts = DAY0;
+  const end = ts + DAY_SEC;
+
+  it("intraday observed_at < bar_end is NOT_FINALIZED", () => {
+    const during = ts + 12 * 3600;
+    const later = end + 86400;
+    assert.equal(observationProvesFinal(ts, during), false);
+    assert.equal(barStatus({ ts, close: 1, high: 1, fetchedAt: during }, later), "PROVISIONAL");
+  });
+
+  it("the same intraday candle stays NOT_FINALIZED a day and a year later", () => {
+    const during = ts + 12 * 3600;
+    const bar = { ts, close: 1, high: 1, fetchedAt: during };
+    assert.equal(barStatus(bar, end + DAY_SEC), "PROVISIONAL");
+    assert.equal(barStatus(bar, end + 365 * DAY_SEC), "PROVISIONAL");
+    assert.equal(observationProvesFinal(ts, during), false);
+  });
+
+  it("observed_at > bar_end is FINALIZED", () => {
+    assert.equal(observationProvesFinal(ts, end + 120), true);
+    assert.equal(barStatus({ ts, close: 1, high: 1, fetchedAt: end + 120 }, end + 120), "FINALIZED");
+  });
+
+  it("observed_at == bar_end is FINALIZED", () => {
+    assert.equal(observationProvesFinal(ts, end), true);
+    assert.equal(barStatus({ ts, close: 1, high: 1, fetchedAt: end }, end + 1), "FINALIZED");
+  });
+
+  it("missing observed_at is NOT_FINALIZED", () => {
+    const later = end + 86400;
+    assert.equal(observationProvesFinal(ts, null), false);
+    assert.equal(barStatus({ ts, close: 1, high: 1, fetchedAt: null }, later), "PROVISIONAL");
+    assert.equal(barStatus({ ts, close: 1, high: 1 }, later), "PROVISIONAL");
+  });
+
+  it("a stamp older than the fetch window cannot finalize the bar", () => {
+    const fake = ts + 200 * DAY_SEC;
+    assert.equal(ts < fake - KLINE_FETCH_WINDOW_SEC, true);
+    assert.equal(observationProvesFinal(ts, fake), false);
+    assert.equal(barStatus({ ts, close: 1, high: 1, fetchedAt: fake }, fake + 10), "PROVISIONAL");
+  });
+
+  it("migration-time now does not finalize an intraday bar", () => {
+    const during = ts + 10 * 3600;
+    const migrateNow = end + 10 * DAY_SEC;
+    assert.equal(barStatus({ ts, close: 1, high: 1, fetchedAt: during }, migrateNow), "PROVISIONAL");
+    assert.equal(barStatus({ ts, close: 1, high: 1, fetchedAt: during }, end + 365 * DAY_SEC), "PROVISIONAL");
+    assert.equal(observationProvesFinal(ts, during), false);
+  });
+});
+
+describe("missing vs zero streak", () => {
+  it("missing previous day is INSUFFICIENT_DATA not zero", () => {
+    const closed = [
+      { ts: DAY0, close: 1 },
+      { ts: DAY0 + 2 * DAY_SEC, close: 2 },
+    ];
+    assert.deepEqual(streakFromClosed(closed), { streak: null, status: "INSUFFICIENT_DATA" });
+    assert.equal(calcStreak(closed), null);
+  });
+
+  it("previous day exists and last close did not rise is VALID_ZERO", () => {
+    const closed = [
+      { ts: DAY0, close: 2 },
+      { ts: DAY0 + DAY_SEC, close: 2 },
+    ];
+    assert.deepEqual(streakFromClosed(closed), { streak: 0, status: "VALID_ZERO" });
+    assert.equal(calcStreak(closed), 0);
+  });
+
+  it("adjacent up tail is POSITIVE_STREAK", () => {
+    const closed = [
+      { ts: DAY0, close: 1 },
+      { ts: DAY0 + DAY_SEC, close: 1.1 },
+      { ts: DAY0 + 2 * DAY_SEC, close: 1.2 },
+    ];
+    assert.deepEqual(streakFromClosed(closed), { streak: 2, status: "POSITIVE_STREAK" });
+  });
+});
+
+describe("N-day uses finalized candles only", () => {
+  it("does not fall back to a provisional close", () => {
+    const now = DAY0 + 6 * DAY_SEC + 3600;
+    const bars = [
+      bar(0, 1),
+      bar(1, 1.1),
+      bar(2, 1.2),
+      bar(3, 1.3),
+      bar(4, 1.4),
+      bar(5, 9.9, 9.9, DAY0 + 5 * DAY_SEC + 100),
+    ];
+    const m = officialDailyMetrics(bars, now, null, 5);
+    assert.equal(m.lastStatus, "PROVISIONAL");
+    assert.equal(m.changeNd, null);
+    assert.equal(m.streak, null);
+    assert.equal(m.streakStatus, "INSUFFICIENT_DATA");
+    assert.equal(calcNDayReturn(getFinalizedDailyBars(bars, now, null), 5), null);
+  });
+});
+
+describe("PUMPGU regression: intraday close must not mint +1975.3%", () => {
+  it("uses the finalized 10-01 close", () => {
+    const d = DAY0;
+    const trueClose = 7.7301777e-05;
+    const intraday = 0.00015835;
+    const base = trueClose / 10.130812;
+    const bars: DailyBar[] = [];
+    for (let i = 0; i < 5; i++) {
+      bars.push(bar(i, base * (1 + i * 0.01)));
+    }
+    bars.push({
+      ts: d + 5 * DAY_SEC,
+      close: trueClose,
+      high: trueClose,
+      fetchedAt: d + 6 * DAY_SEC + 120,
+    });
+    const now = d + 6 * DAY_SEC + 3600;
+    const m = officialDailyMetrics(bars, now, null, 5);
+    assert.ok(m.changeNd != null);
+    assert.ok(Math.abs((m.changeNd ?? 0) * 100 - 913.0812) < 1);
+    assert.ok(((m.changeNd ?? 0) * 100) < 1900);
+    const bogus = officialDailyMetrics(
+      bars.map((b, i) => (i === 5 ? { ...b, close: intraday, high: intraday } : b)),
+      now,
+      null,
+      5,
+    );
+    assert.ok(((bogus.changeNd ?? 0) * 100) > 1900);
   });
 });

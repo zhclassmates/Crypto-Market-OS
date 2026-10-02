@@ -424,7 +424,7 @@ def _remember_seed(con, chain, now):
 
 
 def job_kline(chain):
-    """日 K 有保留名额。先补已观察到 50k 且尚未回填成功的地址，再轮转。
+    """日 K 有保留名额。UTC 日切后先修昨日未 FINALIZED 的研究币，再补首次回填，再轮转。
 
     空响应、解析失败、请求失败都不盖 kline_backfilled_at。
     """
@@ -432,10 +432,14 @@ def job_kline(chain):
     if _skip_if_cooling("gmgn_kline", chain, started):
         return
     M = _gmgn_mod()
+    import market_research as R
     now = int(time.time())
 
     def pick(con):
         _remember_seed(con, chain, now)
+        repair = R.pick_kline_repair(con, chain, now, R.KLINE_REPAIR_BATCH)
+        if repair:
+            return repair
         pending = con.execute(
             """SELECT address FROM token_registry
                WHERE chain=? AND first_liquidity_50k_at IS NOT NULL
@@ -446,7 +450,7 @@ def job_kline(chain):
             (chain, now),
         ).fetchone()
         if pending:
-            return pending["address"]
+            return [pending["address"]]
         today = M.today_utc_start(now)
         for address, _symbol, _name in M.SEED_TOKENS.get(chain, []):
             have = con.execute(
@@ -454,7 +458,7 @@ def job_kline(chain):
                 (chain, address, today),
             ).fetchone()
             if not have:
-                return address
+                return [address]
         cursor = int(db.meta_get(con, "kline_cursor_" + chain, "0") or 0)
         rows = con.execute(
             "SELECT address FROM token_registry WHERE chain=? ORDER BY address",
@@ -466,50 +470,70 @@ def job_kline(chain):
                 (chain,),
             ).fetchall()
         if not rows:
-            return None
+            return []
         addr = rows[cursor % len(rows)]["address"]
         db.meta_set(con, "kline_cursor_" + chain, str(cursor + 1))
-        return addr
+        return [addr]
 
     try:
-        address = with_db(pick)
+        addresses = with_db(pick)
     except Exception as e:
         _finish("gmgn_kline", chain, False, started, error=str(e), run_state="failed")
         return
-    if not address:
+    if not addresses:
         _finish("gmgn_kline", chain, False, started, error="还没有 token 可拉日 K", run_state="zero_write", request_ok=0)
         return
-    try:
-        def write(con):
-            written = M.upsert_daily_kline(con, chain, address, now)
-            if written:
-                db.meta_set(con, "last_kline_update_" + chain, str(now))
-            return written
-        written = with_db(write)
-    except Exception as e:
-        def mark_retry(con):
-            import market_research as R
-            R.schedule_kline_retry(con, chain, address, now)
+
+    written_total = 0
+    last_err = None
+    last_state = "failed"
+    any_request = False
+    for address in addresses:
         try:
-            with_db(mark_retry)
-        except Exception:
-            pass
-        state = "rate_limited" if _rate_limited(e) else "failed"
-        _finish("gmgn_kline", chain, False, started, error=str(e), rows_received=0, run_state=state, request_ok=0)
+            def write(con, addr=address):
+                written = M.upsert_daily_kline(con, chain, addr, now)
+                if written:
+                    db.meta_set(con, "last_kline_update_" + chain, str(now))
+                    db.meta_set(con, "last_kline_update", str(now))
+                return written
+            written = with_db(write)
+            any_request = True
+            written_total += written or 0
+            if not written:
+                def mark_empty(con, addr=address):
+                    R.schedule_kline_retry(con, chain, addr, now, R.kline_repair_delay(now))
+                with_db(mark_empty)
+        except Exception as e:
+            last_err = e
+            last_state = "rate_limited" if _rate_limited(e) else "failed"
+            def mark_retry(con, addr=address):
+                R.schedule_kline_retry(con, chain, addr, now, R.kline_repair_delay(now))
+            try:
+                with_db(mark_retry)
+            except Exception:
+                pass
+            if last_state == "rate_limited":
+                break
+
+    if written_total:
+        _finish(
+            "gmgn_kline", chain, True, started,
+            rows_received=written_total, rows_parsed=written_total, rows_written=written_total,
+            hot_changed=0, cold_changed=1,
+            source_timestamp_missing=True, wrote_db=True,
+            run_state="healthy", request_ok=1,
+        )
         return
-    if not written:
+    if last_err is not None:
         _finish(
             "gmgn_kline", chain, False, started,
-            error="kline empty or unparsed",
-            rows_received=0, rows_written=0, run_state="zero_write", request_ok=1,
+            error=str(last_err), rows_received=0, run_state=last_state, request_ok=0,
         )
         return
     _finish(
-        "gmgn_kline", chain, True, started,
-        rows_received=written, rows_parsed=written, rows_written=written,
-        hot_changed=0, cold_changed=1,
-        source_timestamp_missing=True, wrote_db=True,
-        run_state="healthy", request_ok=1,
+        "gmgn_kline", chain, False, started,
+        error="kline empty or unparsed",
+        rows_received=0, rows_written=0, run_state="zero_write", request_ok=1 if any_request else 0,
     )
 
 

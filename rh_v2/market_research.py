@@ -20,6 +20,19 @@ LIQUIDITY_THRESHOLD = 50000
 LIQUIDITY_FRESHNESS_SEC = 300
 DISCOVERY_BUCKET_SEC = 300
 DAY_SEC = 86400
+LOW_BASE_CLOSE = 1e-8
+EXTREME_ABS_RETURN = 50
+KLINE_REPAIR_BATCH = 8
+# 一次日 K 请求回看多远。market_collect.upsert_daily_kline 用同一个值。
+KLINE_FETCH_WINDOW_SEC = 100 * DAY_SEC
+STATUS_OPEN = "OPEN"
+STATUS_PROVISIONAL = "PROVISIONAL"
+STATUS_FINALIZED = "FINALIZED"
+STREAK_POSITIVE = "POSITIVE_STREAK"
+STREAK_ZERO = "VALID_ZERO"
+STREAK_INSUFFICIENT = "INSUFFICIENT_DATA"
+# rebuild_research_facts / migrate 写入。重复 migrate 看到这个值就不再全表重算。
+CANDLE_FINALIZED_CONTRACT = "observed_at_ge_bar_end_v1"
 OBS_CROSSING = "observed_crossing"
 OBS_FIRST_ABOVE = "first_observed_above"
 LEGACY_SOURCE = "legacy_snapshot"
@@ -43,6 +56,83 @@ def as_real(v):
     if n != n or n in (float("inf"), float("-inf")):
         return None
     return n
+
+
+def utc_day_start(now):
+    now = int(now)
+    return now - now % DAY_SEC
+
+
+def bar_end(ts):
+    return int(ts) + DAY_SEC
+
+
+def observation_proves_final(bar_open, observed_at):
+    """历史日 K 是否 FINALIZED，只由这根 bar 的观测时间决定。
+
+    合同：observed_at >= bar_end，且这根 bar 落在该次日 K 请求的回看窗口里。
+    读数时刻、迁移时刻、'今天已经是以后了' 都不能代入。
+    缺观测时间 → 不能定稿。
+    """
+    if observed_at is None:
+        return False
+    try:
+        opened = int(bar_open)
+        obs = int(observed_at)
+    except (TypeError, ValueError):
+        return False
+    if obs < opened + DAY_SEC:
+        return False
+    if opened < obs - KLINE_FETCH_WINDOW_SEC:
+        return False
+    return True
+
+
+def bar_eligible_by_creation(bar_ts, created_at):
+    """bar 所在 UTC 日 >= token 创建日。createdAt 不表示是否收盘。"""
+    if created_at is None:
+        return True
+    try:
+        created = int(created_at)
+    except (TypeError, ValueError):
+        return True
+    if created <= 0:
+        return True
+    return int(bar_ts) >= utc_day_start(created)
+
+
+def _source_closed(raw):
+    if not isinstance(raw, dict):
+        return False
+    for key in ("closed", "is_closed", "final", "is_final"):
+        val = raw.get(key)
+        if val in (True, 1, "1", "true", "TRUE", "final", "closed"):
+            return True
+    return False
+
+
+def bar_status(ts, fetched_at, now, finalized_at=None, source_closed=False):
+    """FINALIZED 只看观测时间。source_closed 不能在没有观测时间时猜定稿。
+
+    now 只用来区分今天还没收盘的 OPEN 和已经过了日历的 PROVISIONAL。
+    读数时刻不得把盘中 bar 定稿。
+    """
+    del source_closed
+    if bar_end(ts) > int(now):
+        return STATUS_OPEN
+    if observation_proves_final(ts, finalized_at) or observation_proves_final(ts, fetched_at):
+        return STATUS_FINALIZED
+    return STATUS_PROVISIONAL
+
+
+def _finalized_at_for_write(opened, now, source_closed):
+    """now 是这一次抓取的观测时间，不是迁移执行时间。"""
+    now = int(now)
+    if source_closed and observation_proves_final(opened, now):
+        return now
+    if observation_proves_final(opened, now):
+        return now
+    return None
 
 
 def parse_sources(text):
@@ -252,6 +342,7 @@ def write_daily_candles(con, chain, address, rows, now):
     """解析并写入 token_candle，同时镜像 daily_kline 给现有页面。
 
     至少写入一根才返回正数。单根解析失败跳过，不抛。
+    每根有自己的 fetched_at。日历收盘且本次抓取发生在 bar.end 之后才写 finalized_at。
     不在这里设置 kline_backfilled_at。
     """
     if not isinstance(rows, list):
@@ -270,30 +361,43 @@ def write_daily_candles(con, chain, address, rows, now):
         low = as_real(raw.get("low"))
         open_ = as_real(raw.get("open"))
         volume = as_real(raw.get("volume"))
+        amount = as_real(raw.get("amount"))
         if high is None:
             high = close
         if low is None:
             low = close
         if open_ is None:
             open_ = close
-        is_closed = 1 if opened + DAY_SEC <= now else 0
+        source_closed = _source_closed(raw)
+        finalized_at = _finalized_at_for_write(opened, now, source_closed)
+        is_closed = 1 if observation_proves_final(opened, now) else 0
+        vol_text = "" if volume is None else str(volume)
+        amt_text = None if amount is None else str(amount)
         con.execute(
             """INSERT INTO token_candle(
-                 chain, address, candle_open_ts, open, high, low, close, volume, fetched_at, is_closed)
-               VALUES(?,?,?,?,?,?,?,?,?,?)
+                 chain, address, candle_open_ts, open, high, low, close, volume, amount,
+                 fetched_at, finalized_at, is_closed)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(chain, address, candle_open_ts) DO UPDATE SET
                  open=excluded.open, high=excluded.high, low=excluded.low,
-                 close=excluded.close, volume=excluded.volume,
-                 fetched_at=excluded.fetched_at, is_closed=excluded.is_closed""",
-            (chain, address, opened, open_, high, low, close, volume, now, is_closed),
+                 close=excluded.close, volume=excluded.volume, amount=excluded.amount,
+                 fetched_at=excluded.fetched_at, is_closed=excluded.is_closed,
+                 finalized_at=COALESCE(excluded.finalized_at, token_candle.finalized_at)""",
+            (chain, address, opened, open_, high, low, close, volume, amount, now, finalized_at, is_closed),
         )
         con.execute(
-            """INSERT INTO daily_kline(chain, address, ts, open, high, low, close, volume)
-               VALUES(?,?,?,?,?,?,?,?)
+            """INSERT INTO daily_kline(
+                 chain, address, ts, open, high, low, close, volume, amount, fetched_at, finalized_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(chain, address, ts) DO UPDATE SET
                  open=excluded.open, high=excluded.high, low=excluded.low,
-                 close=excluded.close, volume=excluded.volume""",
-            (chain, address, opened, str(open_), str(high), str(low), str(close), "" if volume is None else str(volume)),
+                 close=excluded.close, volume=excluded.volume, amount=excluded.amount,
+                 fetched_at=excluded.fetched_at,
+                 finalized_at=COALESCE(excluded.finalized_at, daily_kline.finalized_at)""",
+            (
+                chain, address, opened, str(open_), str(high), str(low), str(close),
+                vol_text, amt_text, now, finalized_at,
+            ),
         )
         written += 1
     return written
@@ -305,6 +409,122 @@ def schedule_kline_retry(con, chain, address, now, delay=120):
            WHERE chain=? AND address=?""",
         (int(now) + int(delay), chain, address),
     )
+
+
+def kline_repair_delay(now):
+    """UTC 日切后 00:02 / 00:07 / 00:15 的等价退避。"""
+    age = int(now) - utc_day_start(now)
+    if age < 120:
+        return 120 - age
+    if age < 420:
+        return 420 - age
+    if age < 900:
+        return 900 - age
+    return 900
+
+
+def yesterday_open(now):
+    return utc_day_start(now) - DAY_SEC
+
+
+def last_finalized_open(con, chain, address, now):
+    rows = con.execute(
+        """SELECT candle_open_ts, fetched_at, finalized_at FROM token_candle
+           WHERE chain=? AND address=? AND close IS NOT NULL AND close>0
+           ORDER BY candle_open_ts""",
+        (chain, address),
+    ).fetchall()
+    last = None
+    for row in rows:
+        ts = int(row["candle_open_ts"])
+        status = bar_status(ts, row["fetched_at"], now, row["finalized_at"])
+        if status == STATUS_FINALIZED:
+            last = ts
+    return last
+
+
+def needs_yesterday_finalize(con, chain, address, now):
+    yesterday = yesterday_open(now)
+    today = utc_day_start(now)
+    row = con.execute(
+        """SELECT candle_open_ts, fetched_at, finalized_at, close FROM token_candle
+           WHERE chain=? AND address=? AND candle_open_ts=?""",
+        (chain, address, yesterday),
+    ).fetchone()
+    if row is None:
+        tok = con.execute(
+            "SELECT kline_fetched_at FROM tokens WHERE chain=? AND address=?",
+            (chain, address),
+        ).fetchone()
+        fetched = tok["kline_fetched_at"] if tok else None
+        return fetched is None or int(fetched) < today
+    if row["close"] is None:
+        return True
+    status = bar_status(row["candle_open_ts"], row["fetched_at"], now, row["finalized_at"])
+    return status != STATUS_FINALIZED
+
+
+def pick_kline_repair(con, chain, now, limit=KLINE_REPAIR_BATCH):
+    """优先补：流动性>=50k / 正式榜候选 / 已回填研究币，且昨日 K 未 FINALIZED。"""
+    yesterday = yesterday_open(now)
+    today = utc_day_start(now)
+    rows = con.execute(
+        """SELECT r.address,
+                  COALESCE(s.liquidity_num, CAST(NULLIF(s.liquidity, '') AS REAL)) AS liq,
+                  r.first_liquidity_50k_at,
+                  r.kline_backfilled_at,
+                  r.kline_retry_after,
+                  t.kline_fetched_at,
+                  c.fetched_at AS y_fetched,
+                  c.finalized_at AS y_finalized,
+                  c.candle_open_ts AS y_ts
+           FROM token_registry r
+           LEFT JOIN token_snapshot s ON s.chain=r.chain AND s.address=r.address
+           LEFT JOIN tokens t ON t.chain=r.chain AND t.address=r.address
+           LEFT JOIN token_candle c
+             ON c.chain=r.chain AND c.address=r.address AND c.candle_open_ts=?
+           WHERE r.chain=?
+             AND (r.kline_retry_after IS NULL OR r.kline_retry_after <= ?)
+             AND (
+               r.first_liquidity_50k_at IS NOT NULL
+               OR COALESCE(s.liquidity_num, CAST(NULLIF(s.liquidity, '') AS REAL)) >= ?
+               OR r.kline_backfilled_at IS NOT NULL
+             )
+             AND (
+               (c.candle_open_ts IS NULL AND (t.kline_fetched_at IS NULL OR t.kline_fetched_at < ?))
+               OR (c.candle_open_ts IS NOT NULL AND (c.fetched_at IS NULL OR c.fetched_at < ?))
+             )
+           ORDER BY
+             CASE WHEN COALESCE(s.liquidity_num, CAST(NULLIF(s.liquidity, '') AS REAL)) >= ? THEN 0 ELSE 1 END,
+             CASE WHEN r.first_liquidity_50k_at IS NOT NULL THEN 0 ELSE 1 END,
+             COALESCE(r.kline_retry_after, 0)
+           LIMIT ?""",
+        (yesterday, chain, int(now), LIQUIDITY_THRESHOLD, today, today, LIQUIDITY_THRESHOLD, int(limit)),
+    ).fetchall()
+    out = []
+    for row in rows:
+        if row["y_ts"] is None:
+            if row["kline_backfilled_at"] is None and row["liq"] is not None and row["liq"] < LIQUIDITY_THRESHOLD:
+                continue
+            out.append(row["address"])
+            continue
+        status = bar_status(row["y_ts"], row["y_fetched"], now, row["y_finalized"])
+        if status != STATUS_FINALIZED:
+            out.append(row["address"])
+    return out
+
+
+def note_kline_repair_state(con, chain, address, now):
+    """拉取成功后若昨日仍未定稿，继续进修复队列；已定稿则清 retry。"""
+    if needs_yesterday_finalize(con, chain, address, now):
+        schedule_kline_retry(con, chain, address, now, kline_repair_delay(now))
+        return False
+    con.execute(
+        """UPDATE token_registry SET kline_retry_after=NULL, updated_at=?
+           WHERE chain=? AND address=? AND kline_backfilled_at IS NOT NULL""",
+        (int(now), chain, address),
+    )
+    return True
 
 
 def commit_kline_fetch(con, chain, address, rows, now, parsed_ok):
@@ -321,22 +541,22 @@ def commit_kline_fetch(con, chain, address, rows, now, parsed_ok):
         schedule_kline_retry(con, chain, address, now)
         return 0
     con.execute(
-        """UPDATE token_registry SET kline_backfilled_at=?, kline_retry_after=NULL, updated_at=?
+        """UPDATE token_registry SET kline_backfilled_at=?, updated_at=?
            WHERE chain=? AND address=?""",
         (now, now, chain, address),
     )
     db.touch_kline_fetched(con, chain, address, now)
+    note_kline_repair_state(con, chain, address, now)
     refresh_metrics(con, chain, address, now)
     return written
 
 
-def closed_candle_rows(con, chain, address, now):
+def classified_candle_rows(con, chain, address, now, created_at=None):
     rows = con.execute(
-        """SELECT candle_open_ts, high, close FROM token_candle
-           WHERE chain=? AND address=? AND is_closed=1 AND close IS NOT NULL AND close>0
-             AND candle_open_ts + ? <= ?
+        """SELECT candle_open_ts, high, close, fetched_at, finalized_at FROM token_candle
+           WHERE chain=? AND address=? AND close IS NOT NULL AND close>0
            ORDER BY candle_open_ts""",
-        (chain, address, DAY_SEC, int(now)),
+        (chain, address),
     ).fetchall()
     out = []
     seen = set()
@@ -345,12 +565,47 @@ def closed_candle_rows(con, chain, address, now):
         if ts in seen:
             continue
         seen.add(ts)
-        out.append((ts, float(row["close"]), float(row["high"]) if row["high"] is not None else float(row["close"])))
+        if not bar_eligible_by_creation(ts, created_at):
+            continue
+        close = float(row["close"])
+        high = float(row["high"]) if row["high"] is not None else close
+        status = bar_status(ts, row["fetched_at"], now, row["finalized_at"])
+        out.append({
+            "ts": ts,
+            "close": close,
+            "high": high,
+            "fetched_at": row["fetched_at"],
+            "finalized_at": row["finalized_at"],
+            "status": status,
+        })
     return out
 
 
+def closed_candle_rows(con, chain, address, now, created_at=None):
+    """正式指标只用 FINALIZED 日 K。PROVISIONAL 保留在库里，不进这列。"""
+    out = []
+    for row in classified_candle_rows(con, chain, address, now, created_at):
+        if row["status"] != STATUS_FINALIZED:
+            continue
+        out.append((row["ts"], row["close"], row["high"]))
+    return out
+
+
+def official_tail_finalized(classified):
+    calendar = [row for row in classified if row["status"] != STATUS_OPEN]
+    if not calendar:
+        return True
+    return calendar[-1]["status"] == STATUS_FINALIZED
+
+
 def streak_from_closed(closed):
-    """与 src/lib/rh/streak.ts 相同：只比较相邻已收盘日，平盘和缺天都中断。"""
+    """与 src/lib/rh/streak.ts calcStreak 相同：只比较相邻已收盘日，平盘和缺天都中断。
+
+    最后一根没有相邻的前一日 close（不足两根、或前一天缺），没有证据，返回 None。
+    None 是 INSUFFICIENT_DATA，0 是 VALID_ZERO（最后一天明确没涨）。
+    """
+    if len(closed) < 2 or closed[-1][0] - closed[-2][0] != DAY_SEC:
+        return None
     streak = 0
     for i in range(len(closed) - 1, 0, -1):
         if closed[i][0] - closed[i - 1][0] != DAY_SEC:
@@ -360,6 +615,15 @@ def streak_from_closed(closed):
         else:
             break
     return streak
+
+
+def streak_status(closed):
+    streak = streak_from_closed(closed)
+    if streak is None:
+        return STREAK_INSUFFICIENT
+    if streak >= 1:
+        return STREAK_POSITIVE
+    return STREAK_ZERO
 
 
 def returns_from_closed(closed):
@@ -389,15 +653,18 @@ def _has_streak_window(closed):
 
 
 def can_qualify(reg, closed, liquidity, age_sec):
-    """qualified_at：第一次同时满足下面六条的时间。之后不覆盖、不删除。
+    """qualified_at：第一次同时满足下面六条的时间。
 
     1. 已在 token_registry
     2. 已有 50k 观察（observed_crossing 或 first_observed_above 均可，两者仍分开存）
     3. K 线回填已成功
-    4. 至少两根相邻的已收盘日 K，连涨比较有定义（结果可以是 0）
+    4. 至少两根相邻的 FINALIZED 日 K，连涨比较有定义（结果可以是 0）
     5. 当前流动性新鲜（年龄 <= 300 秒）
     6. 当前流动性 >= 50000
     return_2d/3d/5d 缺数据时保持 NULL，不因此阻止 qualified_at。
+
+    实时路径：一旦写入就 sticky，流动性跌破不清掉。
+    修复路径：如果连第 4 条（相邻 FINALIZED 日 K）都不成立，旧值必须清掉。
     """
     if reg is None:
         return False
@@ -408,8 +675,13 @@ def can_qualify(reg, closed, liquidity, age_sec):
     return formal_eligible(liquidity, age_sec)
 
 
-def as_of_date(now):
-    return time.strftime("%Y-%m-%d", time.gmtime(int(now)))
+def as_of_date(finalized_open):
+    """指标实际使用的最后一根 FINALIZED 日 K；无定稿输入时为空。"""
+    if finalized_open is None:
+        # daily_metrics 的旧 schema 是 NOT NULL；空串明确表示没有 as-of 日，
+        # 不能拿运行日、请求日或 OPEN/PROVISIONAL bar 的日期冒充。
+        return ""
+    return time.strftime("%Y-%m-%d", time.gmtime(int(finalized_open)))
 
 
 def _snapshot_liq(con, chain, address):
@@ -427,7 +699,8 @@ def _snapshot_liq(con, chain, address):
     return liq, updated
 
 
-def refresh_metrics(con, chain, address, now):
+def refresh_metrics(con, chain, address, now, repair_qualified=False):
+    """正式研究指标只走 FINALIZED 日 K。repair_qualified 会按当前 finalized 事实重写 qualified_at。"""
     reg = con.execute(
         "SELECT * FROM token_registry WHERE chain=? AND address=?",
         (chain, address),
@@ -435,22 +708,56 @@ def refresh_metrics(con, chain, address, now):
     if reg is None:
         return None
     now = int(now)
-    closed = closed_candle_rows(con, chain, address, now)
+    created = None
+    tok = con.execute(
+        "SELECT token_created_at FROM tokens WHERE chain=? AND address=?",
+        (chain, address),
+    ).fetchone()
+    if tok and tok["token_created_at"]:
+        created = tok["token_created_at"]
+    elif reg["token_created_at"]:
+        created = reg["token_created_at"]
+    classified = classified_candle_rows(con, chain, address, now, created)
+    closed = [(row["ts"], row["close"], row["high"]) for row in classified if row["status"] == STATUS_FINALIZED]
     liq, updated = _snapshot_liq(con, chain, address)
     age = None if updated is None else now - int(updated)
-    r2, r3, r5 = returns_from_closed(closed)
-    streak = streak_from_closed(closed)
+    if official_tail_finalized(classified):
+        r2, r3, r5 = returns_from_closed(closed)
+        streak = streak_from_closed(closed)
+    else:
+        r2, r3, r5 = None, None, None
+        streak = None
     eligible = 1 if formal_eligible(liq, age) else 0
     qualified = reg["qualified_at"]
-    if qualified is None and can_qualify(reg, closed, liq, age):
+    if repair_qualified and not _has_streak_window(closed):
+        if qualified is not None:
+            con.execute(
+                """UPDATE token_registry SET qualified_at=NULL, updated_at=?
+                   WHERE chain=? AND address=?""",
+                (now, chain, address),
+            )
+        qualified = None
+    elif qualified is None and can_qualify(reg, closed, liq, age):
         qualified = now
         con.execute(
             """UPDATE token_registry SET qualified_at=?, updated_at=?
                WHERE chain=? AND address=? AND qualified_at IS NULL""",
             (qualified, now, chain, address),
         )
+    qualified_sql = (
+        "qualified_at=excluded.qualified_at"
+        if repair_qualified
+        else "qualified_at=COALESCE(daily_metrics.qualified_at, excluded.qualified_at)"
+    )
+    metric_as_of = as_of_date(closed[-1][0] if closed else None)
+    # daily_metrics 是每个 token 的当前物化结果，不保留会参与集合统计的旧行。
+    # as_of 日推进或回退时先移除旧 key，避免旧 positive streak 残留。
     con.execute(
-        """INSERT INTO daily_metrics(
+        "DELETE FROM daily_metrics WHERE chain=? AND address=? AND as_of_date<>?",
+        (chain, address, metric_as_of),
+    )
+    con.execute(
+        f"""INSERT INTO daily_metrics(
              chain, address, as_of_date, streak, return_2d, return_3d, return_5d,
              liquidity, liquidity_age_sec, eligible, qualified_at, calculated_at)
            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
@@ -462,14 +769,22 @@ def refresh_metrics(con, chain, address, now):
              liquidity=excluded.liquidity,
              liquidity_age_sec=excluded.liquidity_age_sec,
              eligible=excluded.eligible,
-             qualified_at=COALESCE(daily_metrics.qualified_at, excluded.qualified_at),
+             {qualified_sql},
              calculated_at=excluded.calculated_at""",
         (
-            chain, address, as_of_date(now), streak, r2, r3, r5,
+            chain, address, metric_as_of, streak, r2, r3, r5,
             liq, age, eligible, qualified, now,
         ),
     )
-    return {"streak": streak, "return_2d": r2, "return_3d": r3, "return_5d": r5, "eligible": eligible, "qualified_at": qualified}
+    return {
+        "streak": streak,
+        "streak_status": streak_status(closed) if official_tail_finalized(classified) else STREAK_INSUFFICIENT,
+        "return_2d": r2,
+        "return_3d": r3,
+        "return_5d": r5,
+        "eligible": eligible,
+        "qualified_at": qualified,
+    }
 
 
 def parse_rank_items(data):
@@ -703,27 +1018,117 @@ def _seed_registry(con, now):
     )
 
 
+def _observed_at_sql(bar_ts_expr, fetched_expr, token_fetched_expr):
+    """一条 SQL 表达式：这根 bar 的观测时间。迁移 now 不能出现。"""
+    return f"""CASE
+      WHEN {fetched_expr} IS NOT NULL
+       AND {bar_ts_expr} >= {fetched_expr} - :window THEN {fetched_expr}
+      WHEN {token_fetched_expr} IS NOT NULL
+       AND {bar_ts_expr} >= {token_fetched_expr} - :window THEN {token_fetched_expr}
+    END"""
+
+
+def _proves_sql(bar_ts_expr, observed_expr):
+    return (
+        f"{observed_expr} IS NOT NULL "
+        f"AND {observed_expr} >= {bar_ts_expr} + :day "
+        f"AND {bar_ts_expr} >= {observed_expr} - :window"
+    )
+
+
+def _backfill_per_bar_fetched(con):
+    """把 canonical token_candle 的较新逐 bar 观测同步到 daily_kline。
+
+    旧 collector 会更新 token_candle.fetched_at，但 daily_kline 当时还没有逐 bar
+    时间列。后来 migration 写入的非空盘中时间不能挡住真实的收盘后重抓时间。
+    这里只复制已经存在的观测事实；定稿仍由 rebuild_candle_finalized 按
+    observed_at >= bar_end 统一写，migration/read 的当前时间不参与。
+    """
+    con.execute(
+        """UPDATE daily_kline
+           SET fetched_at = (
+             SELECT tc.fetched_at FROM token_candle tc
+             WHERE tc.chain = daily_kline.chain
+               AND tc.address = daily_kline.address
+               AND tc.candle_open_ts = daily_kline.ts
+           )
+           WHERE EXISTS (
+             SELECT 1 FROM token_candle tc
+             WHERE tc.chain = daily_kline.chain
+               AND tc.address = daily_kline.address
+               AND tc.candle_open_ts = daily_kline.ts
+               AND tc.fetched_at IS NOT NULL
+               AND (daily_kline.fetched_at IS NULL OR tc.fetched_at > daily_kline.fetched_at)
+           )"""
+    )
+
+
 def _copy_candles(con, now):
     """已有 daily_kline 是以前拉到的 K 线，可以进 token_candle。
 
     这不是新的回填成功，所以不写 kline_backfilled_at。
+
+    是否收盘只看当时那次观测：observed_at >= bar_end。observed_at 优先用
+    这根 daily_kline 自己的 fetched_at；没有则用 token 最后一次成功拉日 K
+    的时间，且这根 bar 必须落在那次请求的 100 天窗口里。
+    迁移执行时间 now 不参与判断：同一根 bar 今天迁、明天迁，结果一样。
+    没有可证明的观测时间就留 NULL，不收盘、不定稿。
     """
+    del now  # 迁移时间不能决定历史 bar 的状态
+    observed = _observed_at_sql("d.ts", "d.fetched_at", "t.kline_fetched_at")
+    proves = _proves_sql("d.ts", observed)
     con.execute(
-        """INSERT OR IGNORE INTO token_candle(
-             chain, address, candle_open_ts, open, high, low, close, volume, fetched_at, is_closed)
+        f"""INSERT OR IGNORE INTO token_candle(
+             chain, address, candle_open_ts, open, high, low, close, volume,
+             fetched_at, finalized_at, is_closed)
            SELECT d.chain, d.address, d.ts,
                   CAST(NULLIF(d.open, '') AS REAL),
                   CAST(NULLIF(d.high, '') AS REAL),
                   CAST(NULLIF(d.low, '') AS REAL),
                   CAST(NULLIF(d.close, '') AS REAL),
                   CAST(NULLIF(d.volume, '') AS REAL),
-                  COALESCE(
-                    (SELECT t.kline_fetched_at FROM tokens t WHERE t.chain=d.chain AND t.address=d.address),
-                    d.ts
-                  ),
-                  CASE WHEN d.ts + ? <= ? THEN 1 ELSE 0 END
-           FROM daily_kline d""",
-        (DAY_SEC, int(now)),
+                  {observed},
+                  CASE WHEN {proves} THEN {observed} END,
+                  CASE WHEN {proves} THEN 1 ELSE 0 END
+           FROM daily_kline d
+           LEFT JOIN tokens t ON t.chain = d.chain AND t.address = d.address""",
+        {"day": DAY_SEC, "window": KLINE_FETCH_WINDOW_SEC},
+    )
+
+
+def rebuild_candle_finalized(con):
+    """按 observed_at >= bar_end 重写 token_candle / daily_kline 的定稿字段。
+
+    不读 current time。窗口外的 fetched_at 不能证明这根 bar，清掉定稿。
+    同一批历史 candle 无论哪天跑，结果一样。
+    """
+    params = {"day": DAY_SEC, "window": KLINE_FETCH_WINDOW_SEC}
+    tc_obs = _observed_at_sql(
+        "token_candle.candle_open_ts",
+        "token_candle.fetched_at",
+        "(SELECT t.kline_fetched_at FROM tokens t "
+        "WHERE t.chain = token_candle.chain AND t.address = token_candle.address)",
+    )
+    tc_proves = _proves_sql("token_candle.candle_open_ts", tc_obs)
+    con.execute(
+        f"""UPDATE token_candle
+            SET fetched_at = {tc_obs},
+                finalized_at = CASE WHEN {tc_proves} THEN {tc_obs} END,
+                is_closed = CASE WHEN {tc_proves} THEN 1 ELSE 0 END""",
+        params,
+    )
+    dk_obs = _observed_at_sql(
+        "daily_kline.ts",
+        "daily_kline.fetched_at",
+        "(SELECT t.kline_fetched_at FROM tokens t "
+        "WHERE t.chain = daily_kline.chain AND t.address = daily_kline.address)",
+    )
+    dk_proves = _proves_sql("daily_kline.ts", dk_obs)
+    con.execute(
+        f"""UPDATE daily_kline
+            SET fetched_at = {dk_obs},
+                finalized_at = CASE WHEN {dk_proves} THEN {dk_obs} END""",
+        params,
     )
 
 
@@ -740,10 +1145,27 @@ def _fill_snapshot_numbers(con):
     )
 
 
-def _rebuild_metrics(con, now):
+def _rebuild_metrics(con, now, repair_qualified=False):
     tokens = con.execute("SELECT chain, address FROM token_registry").fetchall()
     for row in tokens:
-        refresh_metrics(con, row["chain"], row["address"], now)
+        refresh_metrics(
+            con, row["chain"], row["address"], now, repair_qualified=repair_qualified,
+        )
+
+
+def rebuild_research_facts(con, now=None):
+    """正式修复入口：candle finalized → daily_metrics → streak / N 日 → qualified_at。
+
+    不手工 UPDATE 派生结果。now 只写 as_of_date / OPEN 日历，不定历史 finalized。
+    """
+    now = int(time.time() if now is None else now)
+    _copy_candles(con, now)
+    _backfill_per_bar_fetched(con)
+    rebuild_candle_finalized(con)
+    _rebuild_metrics(con, now, repair_qualified=True)
+    db.meta_set(con, "candle_finalized_contract", CANDLE_FINALIZED_CONTRACT)
+    con.commit()
+    return now
 
 
 def migrate(con):
@@ -767,6 +1189,14 @@ def migrate(con):
         ("first_seen_at", "INTEGER"), ("kline_fetched_at", "INTEGER"),
     ):
         _ensure_column(con, "tokens", col, decl)
+    for col, decl in (
+        ("amount", "TEXT"), ("fetched_at", "INTEGER"), ("finalized_at", "INTEGER"),
+    ):
+        _ensure_column(con, "daily_kline", col, decl)
+    for col, decl in (
+        ("amount", "REAL"), ("finalized_at", "INTEGER"),
+    ):
+        _ensure_column(con, "token_candle", col, decl)
     for col, decl in (
         ("rows_parsed", "INTEGER NOT NULL DEFAULT 0"),
         ("rows_written", "INTEGER NOT NULL DEFAULT 0"),
@@ -795,16 +1225,18 @@ def migrate(con):
             (LIQUIDITY_THRESHOLD,),
         )
         db.meta_set(con, "phase1_below_noted", "1")
-    if db.meta_get(con, "phase1_migrated") == "1":
-        con.commit()
-        return
     now = int(time.time())
-    _fill_snapshot_numbers(con)
-    _seed_registry(con, now)
+    if db.meta_get(con, "phase1_migrated") != "1":
+        _fill_snapshot_numbers(con)
+        _seed_registry(con, now)
+        db.meta_set(con, "phase1_migrated", "1")
+        db.meta_set(con, "phase1_legacy_note", LEGACY_NOTE)
     _copy_candles(con, now)
-    _rebuild_metrics(con, now)
-    db.meta_set(con, "phase1_migrated", "1")
-    db.meta_set(con, "phase1_legacy_note", LEGACY_NOTE)
+    _backfill_per_bar_fetched(con)
+    if db.meta_get(con, "candle_finalized_contract") != CANDLE_FINALIZED_CONTRACT:
+        rebuild_candle_finalized(con)
+        _rebuild_metrics(con, now, repair_qualified=True)
+        db.meta_set(con, "candle_finalized_contract", CANDLE_FINALIZED_CONTRACT)
     con.commit()
 
 
