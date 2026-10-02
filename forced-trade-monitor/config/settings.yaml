@@ -1,0 +1,17 @@
+exchange: binance_usdm
+base_url: https://fapi.binance.com
+bar: 1h
+decision_delay_sec: 120
+top_n: 80
+min_listing_days: 14
+quote_asset: USDT
+contract_type: PERPETUAL
+zscore_window_hours: 168
+zscore_min_obs: 24
+funding_lookback_days: 30
+volume_lookback_days: 30
+default_funding_interval_hours: 8
+basis_divergence_flag_bps: 5.0
+btc_symbol: BTCUSDT
+db_path: data/forced_trade.sqlite
+request_sleep_ms: 200

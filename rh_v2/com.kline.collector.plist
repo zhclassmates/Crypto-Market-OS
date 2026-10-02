@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 日 K 采集器：launchd + --once 模式，每 4 小时跑一轮。
+     launchd 的 PATH 不带 homebrew，需要显式注入。
+
+     安装：cp com.kline.collector.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.kline.collector.plist
+     卸载：launchctl bootout gui/$(id -u)/com.kline.collector && rm ~/Library/LaunchAgents/com.kline.collector.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.kline.collector</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/caffeinate</string><string>-i</string>
+    <string>/opt/homebrew/bin/python3</string><string>/Users/zhaomosheng/Desktop/ctiwvGy8hZk3VdCu-grok-workspace/rh_v2/kline_run.py</string><string>once</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/zhaomosheng/Desktop/ctiwvGy8hZk3VdCu-grok-workspace/rh_v2</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartInterval</key><integer>14400</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/zhaomosheng/Desktop/ctiwvGy8hZk3VdCu-grok-workspace/rh_v2/logs/kline.log</string>
+  <key>StandardErrorPath</key><string>/Users/zhaomosheng/Desktop/ctiwvGy8hZk3VdCu-grok-workspace/rh_v2/logs/kline.log</string>
+</dict></plist>

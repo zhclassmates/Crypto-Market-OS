@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 全市场采集器常驻 loop。Trending / Trenches / Signal 300s，Hot 120s，日 K 60s，安全指标 10min。
+     不要再用 StartInterval 把整表打成一轮。
+
+     launchd 的 PATH 只有 /usr/bin:/usr/sbin，
+     这里显式注入 /opt/homebrew/bin 才能找到 gmgn-cli 和 python3。
+
+     安装：cp com.market.collector.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.market.collector.plist
+     重载：launchctl bootout gui/$(id -u)/com.market.collector; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.market.collector.plist
+     卸载：launchctl bootout gui/$(id -u)/com.market.collector && rm ~/Library/LaunchAgents/com.market.collector.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.market.collector</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/caffeinate</string><string>-i</string>
+    <string>/opt/homebrew/bin/python3</string><string>/Users/zhaomosheng/Desktop/ctiwvGy8hZk3VdCu-grok-workspace/rh_v2/market_run.py</string><string>loop</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/zhaomosheng/Desktop/ctiwvGy8hZk3VdCu-grok-workspace/rh_v2</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/zhaomosheng/Desktop/ctiwvGy8hZk3VdCu-grok-workspace/rh_v2/logs/market.log</string>
+  <key>StandardErrorPath</key><string>/Users/zhaomosheng/Desktop/ctiwvGy8hZk3VdCu-grok-workspace/rh_v2/logs/market.log</string>
+</dict></plist>

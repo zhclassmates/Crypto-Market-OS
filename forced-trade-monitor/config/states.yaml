@@ -1,0 +1,37 @@
+global:
+  enabled: true
+  cooldown_hours: 12
+  min_listing_days: 14
+  top_n: 80
+
+states:
+  crowded_long_under_pressure:
+    enabled: true
+    funding_percentile_min: 0.90
+    ret_4h_vs_btc_max: 0
+    oi_change_4h_min: 0
+    taker_imbalance_4h_max: -0.10
+
+  crowded_short_under_pressure:
+    enabled: true
+    funding_percentile_max: 0.10
+    ret_4h_vs_btc_min: 0
+    oi_change_4h_min: 0
+    taker_imbalance_4h_min: 0.10
+
+  deleveraging_in_progress:
+    enabled: true
+    abs_return_z_min: 1.5
+    oi_change_z_max: -1.5
+    require_flow_alignment: true
+
+  delever_done:
+    enabled: false
+    prior_deleveraging_window_hours: 6
+    require_funding_normalization: true
+    require_flow_normalization: true
+
+  basis_distortion:
+    enabled: true
+    basis_z_abs_min: 2.0
+    directional_signal: false
