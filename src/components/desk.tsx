@@ -1,21 +1,42 @@
 import { useEffect, useState } from "react";
 import { LadderView } from "@/components/ladder-view";
+import { MarketView } from "@/components/market-view";
 import { MethodView } from "@/components/method-view";
+import { RadarView } from "@/components/radar-view";
 import { ScoreView } from "@/components/score-view";
+import { StreakView } from "@/components/streak-view";
 
-type Tab = "ladder" | "score" | "method";
+type Tab = "ladder" | "market" | "score" | "streak" | "radar" | "method" | "watch";
 
 const TABS: { id: Tab; label: string; hint: string }[] = [
   { id: "ladder", label: "上币阶梯", hint: "走到了哪一级" },
+  { id: "market", label: "市场排行", hint: "N日涨跌幅" },
   { id: "score", label: "四列", hint: "当场拉数打分" },
+  { id: "streak", label: "日K连涨", hint: "离线算 pattern" },
+  { id: "radar", label: "强平雷达", hint: "拥挤与去杠杆" },
   { id: "method", label: "口径", hint: "规则写在明处" },
+  { id: "watch", label: "自选", hint: "盯住的代币" },
 ];
+
+const HASH: Record<Tab, string> = {
+  ladder: "#sec-ladder",
+  market: "#sec-market",
+  score: "#sec-score",
+  streak: "#sec-streak",
+  radar: "#sec-radar",
+  method: "#sec-method",
+  watch: "#sec-watch",
+};
 
 function tabFromHash(hash: string): Tab | null {
   const h = hash.replace("#", "");
   if (h === "score" || h === "sec-score") return "score";
+  if (h === "market" || h === "sec-market") return "market";
+  if (h === "streak" || h === "sec-streak") return "streak";
+  if (h === "radar" || h === "sec-radar") return "radar";
   if (h === "method" || h === "sec-method") return "method";
   if (h === "ladder" || h === "sec-ladder") return "ladder";
+  if (h === "watch" || h === "sec-watch") return "watch";
   return null;
 }
 
@@ -35,8 +56,7 @@ export function Desk() {
 
   function go(id: Tab) {
     setTab(id);
-    const hash = id === "ladder" ? "#sec-ladder" : id === "score" ? "#sec-score" : "#sec-method";
-    window.history.replaceState(null, "", hash);
+    window.history.replaceState(null, "", HASH[id]);
   }
 
   return (
@@ -69,8 +89,12 @@ export function Desk() {
         </div>
       </header>
       {tab === "ladder" ? <LadderView /> : null}
+      {tab === "market" ? <MarketView /> : null}
       {tab === "score" ? <ScoreView /> : null}
+      {tab === "streak" ? <StreakView /> : null}
+      {tab === "radar" ? <RadarView /> : null}
       {tab === "method" ? <MethodView /> : null}
+      {tab === "watch" ? <MarketView watchOnly /> : null}
     </div>
   );
 }

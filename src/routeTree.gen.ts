@@ -10,33 +10,53 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as HealthLabRouteImport } from './routes/health-lab'
+import { Route as ApiHealthMarketRouteImport } from './routes/api/health/market'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HealthLabRoute = HealthLabRouteImport.update({
+  id: '/health-lab',
+  path: '/health-lab',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiHealthMarketRoute = ApiHealthMarketRouteImport.update({
+  id: '/api/health/market',
+  path: '/api/health/market',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/health-lab': typeof HealthLabRoute
+  '/api/health/market': typeof ApiHealthMarketRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/health-lab': typeof HealthLabRoute
+  '/api/health/market': typeof ApiHealthMarketRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/health-lab': typeof HealthLabRoute
+  '/api/health/market': typeof ApiHealthMarketRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/health-lab' | '/api/health/market'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/health-lab' | '/api/health/market'
+  id: '__root__' | '/' | '/health-lab' | '/api/health/market'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  HealthLabRoute: typeof HealthLabRoute
+  ApiHealthMarketRoute: typeof ApiHealthMarketRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +68,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/health-lab': {
+      id: '/health-lab'
+      path: '/health-lab'
+      fullPath: '/health-lab'
+      preLoaderRoute: typeof HealthLabRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/health/market': {
+      id: '/api/health/market'
+      path: '/api/health/market'
+      fullPath: '/api/health/market'
+      preLoaderRoute: typeof ApiHealthMarketRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  HealthLabRoute: HealthLabRoute,
+  ApiHealthMarketRoute: ApiHealthMarketRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

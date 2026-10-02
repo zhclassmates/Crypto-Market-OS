@@ -11,6 +11,18 @@ export function MethodView() {
       <p className="text-sm text-pretty text-muted">
         阶梯回答「走到了哪一级」。四列回答「这一小时的量和筹码像不像还早、还干净」。两套数字不要加成一个总分。
       </p>
+      <section className="rounded-xl border border-line p-4">
+        <h2 className="text-sm font-medium">市场排行时间口径</h2>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-pretty">
+          <li>24H：当前价格相对 24 小时前的滚动涨跌幅。</li>
+          <li>日K：最近一根已收盘 UTC 日K，相对前一根已收盘日K的涨跌幅。</li>
+          <li>连涨：连续多少根已收盘 UTC 日K收盘价高于前一日。</li>
+          <li>N日累计：最新已收盘 UTC 日K收盘价，相对 N 个完整日线区间前收盘价的累计变化。</li>
+        </ul>
+        <p className="mt-2 text-xs text-pretty text-muted">
+          顶部 1D / 2D / 3D / 5D / 7D / 10D / 14D / 30D 只改 N 日累计和全市场按它的排名。日K、连涨、24H 不跟窗口走。不足 N 个完整已收盘日线区间显示 —，不拿 24H 或更短窗口顶上。
+        </p>
+      </section>
       <section className="flex flex-col gap-3">
         {ROWS.map(([name, mix, note]) => (
           <article key={name} className="rounded-xl border border-line bg-surface p-4">
