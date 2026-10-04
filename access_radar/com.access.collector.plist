@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Access Radar collector, resident loop (one thread per source; Bithumb notices 2s, CEX market lists 30-60s,
+     xStocks 10min, Ramp 20min, Circle 6h; WebSocket sources reconnect 1s->30s). Do NOT use StartInterval.
+
+     __REPO__ is a placeholder for the absolute path of the Crypto-Market-OS checkout. Replace it when installing,
+     and replace /opt/homebrew/bin/python3 with the output of `which python3` if it differs.
+     launchd's PATH is only /usr/bin:/usr/sbin, so PATH is injected explicitly below.
+     launchd does not create the log directory: mkdir it first.
+
+     Install:
+       cd /path/to/Crypto-Market-OS
+       mkdir -p access_radar/logs
+       sed "s#__REPO__#$(pwd)#g" access_radar/com.access.collector.plist > ~/Library/LaunchAgents/com.access.collector.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.access.collector.plist
+     Reload:    launchctl bootout gui/$(id -u)/com.access.collector; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.access.collector.plist
+     Uninstall: launchctl bootout gui/$(id -u)/com.access.collector && rm ~/Library/LaunchAgents/com.access.collector.plist
+     Check:     python3 access_radar/access_run.py status
+
+     Optional env (add under EnvironmentVariables): ACCESS_DB, ACCESS_PROXY (e.g. http://127.0.0.1:7890), ACCESS_UA,
+     ACCESS_LOG_LEVEL. The app log is access_radar/logs/access.log (rotating); launchd.log only holds stdout/stderr. -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.access.collector</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/caffeinate</string><string>-i</string>
+    <string>/opt/homebrew/bin/python3</string><string>__REPO__/access_radar/access_run.py</string><string>loop</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__/access_radar</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__REPO__/access_radar/logs/launchd.log</string>
+  <key>StandardErrorPath</key><string>__REPO__/access_radar/logs/launchd.log</string>
+</dict></plist>

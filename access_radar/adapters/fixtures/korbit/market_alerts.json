@@ -1,0 +1,37 @@
+{
+ "_meta": "documented shape: GET /v2/marketAlerts; the 'warning'/유의 종목 alert type is ASSUMED (docs only show price/limit_buy_range)",
+ "success": true,
+ "data": [
+  {
+   "symbol": "btc_krw",
+   "alerts": [
+    {
+     "type": "price",
+     "typeKorean": "가격 급등락",
+     "level": "danger",
+     "levelKorean": "투자위험",
+     "startAt": 1700000000000,
+     "endAt": 1700000000000,
+     "value": "250.5"
+    },
+    {
+     "type": "limit_buy_range",
+     "typeKorean": "주문가격 제한",
+     "startAt": 1700000000000,
+     "endAt": 1700000000000,
+     "value": "145000000"
+    }
+   ]
+  },
+  {
+   "symbol": "doge_krw",
+   "alerts": [
+    {
+     "type": "warning",
+     "typeKorean": "유의 종목 지정",
+     "startAt": 1790000500000
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,98 @@
+{
+ "_meta": "documented: docs.upbit.com/kr/reference/websocket-announcement (DEFAULT + SIMPLE keys); titles/bodies are illustrative",
+ "messages": [
+  {
+   "type": "announcement",
+   "event_type": "CREATED",
+   "uuid": "562593104",
+   "title": "[거래] 신규 거래 지원 안내 - 레이어제로(ZRO) (KRW, BTC, USDT 마켓)",
+   "category": "trade",
+   "url": "https://www.upbit.com/service_center/notice?id=562593104&view=share",
+   "first_listed_at": "2026-07-14T16:36:34+09:00",
+   "listed_at": "2026-07-14T16:36:34+09:00",
+   "timestamp": 1752478594123,
+   "stream_type": "REALTIME",
+   "body": "거래지원 개시 시점 : 2026년 7월 14일 18:00 예정\n입금 지원 시점: 공지 시점으로부터 1시간 이내"
+  },
+  {
+   "type": "announcement",
+   "event_type": "CREATED",
+   "uuid": "562593200",
+   "title": "[거래] 거래지원 종료 안내 (OMG)",
+   "category": "trade",
+   "url": "https://www.upbit.com/service_center/notice?id=562593200&view=share",
+   "first_listed_at": "2026-07-15T10:00:00+09:00",
+   "listed_at": "2026-07-15T10:00:00+09:00",
+   "timestamp": 1752541200456,
+   "stream_type": "REALTIME",
+   "body": "입금 중단: 2026년 7월 15일 10:00\n거래지원 종료 일시 : 2026년 7월 29일 (수) 15:00\n출금 지원 종료: 2026년 8월 28일 15:00"
+  },
+  {
+   "type": "announcement",
+   "event_type": "CREATED",
+   "uuid": "562593300",
+   "title": "[거래] 유의 종목 지정 안내 (SAND)",
+   "category": "trade",
+   "url": "https://www.upbit.com/service_center/notice?id=562593300&view=share",
+   "first_listed_at": "2026-07-16T09:00:00+09:00",
+   "listed_at": "2026-07-16T09:00:00+09:00",
+   "timestamp": 1752624000789,
+   "stream_type": "REALTIME"
+  },
+  {
+   "type": "announcement",
+   "event_type": "CREATED",
+   "uuid": "562593400",
+   "title": "[입출금] 이더리움(ETH) 네트워크 업그레이드에 따른 입출금 일시 중단 안내",
+   "category": "wallet",
+   "url": "https://www.upbit.com/service_center/notice?id=562593400&view=share",
+   "first_listed_at": "2026-07-17T11:00:00+09:00",
+   "listed_at": "2026-07-17T11:00:00+09:00",
+   "timestamp": 1752717600000,
+   "stream_type": "REALTIME"
+  },
+  {
+   "type": "announcement",
+   "event_type": "CREATED",
+   "uuid": "562593500",
+   "title": "[이벤트] 레이어제로(ZRO) 신규 거래지원 기념 에어드랍 이벤트",
+   "category": "event",
+   "url": "https://www.upbit.com/service_center/notice?id=562593500&view=share",
+   "first_listed_at": "2026-07-14T17:00:00+09:00",
+   "listed_at": "2026-07-14T17:00:00+09:00",
+   "timestamp": 1752480000000,
+   "stream_type": "REALTIME"
+  },
+  {
+   "type": "announcement",
+   "event_type": "UPDATED",
+   "uuid": "562593200",
+   "title": "[거래] 거래지원 종료 안내 (OMG)",
+   "category": "trade",
+   "url": "https://www.upbit.com/service_center/notice?id=562593200&view=share",
+   "first_listed_at": "2026-07-15T10:00:00+09:00",
+   "listed_at": "2026-07-16T12:00:00+09:00",
+   "timestamp": 1752634800000,
+   "stream_type": "REALTIME",
+   "body": "거래지원 종료 일시 : 2026년 8월 5일 (수) 15:00 (일정 변경)"
+  },
+  {
+   "ty": "announcement",
+   "et": "CREATED",
+   "uid": "562593600",
+   "tt": "[거래] 유의 종목 지정 해제 안내 (SAND)",
+   "cat": "trade",
+   "url": "https://www.upbit.com/service_center/notice?id=562593600&view=share",
+   "flat": "2026-07-20T09:00:00+09:00",
+   "lat": "2026-07-20T09:00:00+09:00",
+   "tms": 1752969600000,
+   "st": "REALTIME"
+  }
+ ],
+ "error": {
+  "error": {
+   "name": "INVALID_AUTH",
+   "message": "auth failed"
+  }
+ }
+}

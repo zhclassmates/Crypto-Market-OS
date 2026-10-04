@@ -1,0 +1,63 @@
+{
+ "_meta": "ASSUMED shape of the unofficial web endpoint api-manager.upbit.com/api/v1/announcements (not in official docs)",
+ "page1": {
+  "success": true,
+  "data": {
+   "total_pages": 2,
+   "total_count": 4,
+   "fixed_notices": [],
+   "notices": [
+    {
+     "id": 562593700,
+     "title": "[거래] 신규 거래 지원 안내 - 에테나(ENA) (KRW 마켓)",
+     "category": "거래",
+     "first_listed_at": "2026-07-21T15:00:00+09:00",
+     "listed_at": "2026-07-21T15:00:00+09:00",
+     "need_new_badge": true,
+     "need_update_badge": false
+    },
+    {
+     "id": 562593650,
+     "title": "[거래] 거래지원 종료 안내 (AXS)",
+     "category": "거래",
+     "first_listed_at": "2026-07-21T11:00:00+09:00",
+     "listed_at": "2026-07-21T11:00:00+09:00",
+     "need_new_badge": true,
+     "need_update_badge": false
+    }
+   ]
+  }
+ },
+ "page2": {
+  "success": true,
+  "data": {
+   "total_pages": 2,
+   "total_count": 4,
+   "fixed_notices": [],
+   "notices": [
+    {
+     "id": 562593610,
+     "title": "[점검] 서버 점검 안내",
+     "category": "점검",
+     "first_listed_at": "2026-07-20T20:00:00+09:00",
+     "listed_at": "2026-07-20T20:00:00+09:00"
+    },
+    {
+     "id": 562593000,
+     "title": "[거래] 신규 거래 지원 안내 - 옛날코인(OLD) (KRW 마켓)",
+     "category": "거래",
+     "first_listed_at": "2026-07-01T10:00:00+09:00",
+     "listed_at": "2026-07-01T10:00:00+09:00"
+    }
+   ]
+  }
+ },
+ "detail_562593650": {
+  "success": true,
+  "data": {
+   "id": 562593650,
+   "title": "[거래] 거래지원 종료 안내 (AXS)",
+   "body": "거래지원 종료 일시: 2026년 8월 4일 15:00"
+  }
+ }
+}

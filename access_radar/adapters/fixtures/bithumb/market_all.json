@@ -1,0 +1,128 @@
+[
+ {
+  "market": "KRW-BTC",
+  "korean_name": "BTC 한글",
+  "english_name": "BTC name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-ETH",
+  "korean_name": "ETH 한글",
+  "english_name": "ETH name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-XRP",
+  "korean_name": "XRP 한글",
+  "english_name": "XRP name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-SOL",
+  "korean_name": "SOL 한글",
+  "english_name": "SOL name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-DOGE",
+  "korean_name": "DOGE 한글",
+  "english_name": "DOGE name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-ADA",
+  "korean_name": "ADA 한글",
+  "english_name": "ADA name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-TRX",
+  "korean_name": "TRX 한글",
+  "english_name": "TRX name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-LINK",
+  "korean_name": "LINK 한글",
+  "english_name": "LINK name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-AVAX",
+  "korean_name": "AVAX 한글",
+  "english_name": "AVAX name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-DOT",
+  "korean_name": "DOT 한글",
+  "english_name": "DOT name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-SHIB",
+  "korean_name": "SHIB 한글",
+  "english_name": "SHIB name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-PEPE",
+  "korean_name": "PEPE 한글",
+  "english_name": "PEPE name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "KRW-RFR",
+  "korean_name": "RFR 한글",
+  "english_name": "RFR name",
+  "market_warning": "CAUTION"
+ },
+ {
+  "market": "KRW-SHELL",
+  "korean_name": "SHELL 한글",
+  "english_name": "SHELL name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "BTC-ETH",
+  "korean_name": "ETH 한글",
+  "english_name": "ETH name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "BTC-XRP",
+  "korean_name": "XRP 한글",
+  "english_name": "XRP name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "BTC-SOL",
+  "korean_name": "SOL 한글",
+  "english_name": "SOL name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "BTC-DOGE",
+  "korean_name": "DOGE 한글",
+  "english_name": "DOGE name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "BTC-ADA",
+  "korean_name": "ADA 한글",
+  "english_name": "ADA name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "BTC-TRX",
+  "korean_name": "TRX 한글",
+  "english_name": "TRX name",
+  "market_warning": "NONE"
+ },
+ {
+  "market": "BTC-LINK",
+  "korean_name": "LINK 한글",
+  "english_name": "LINK name",
+  "market_warning": "NONE"
+ }
+]

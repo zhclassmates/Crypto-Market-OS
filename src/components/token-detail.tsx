@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { X } from "lucide-react";
 import { fetchTokenDetail, type TokenDetail } from "@/lib/rh/discovery-server";
+import { fetchBuyEntries } from "@/lib/rh/access-server";
+import { TZ_LABEL, fmtTs8, fmtTs8Full, type BuyEntry } from "@/lib/rh/access-core";
 import type { SolAuthority } from "@/lib/rh/discovery";
 
 export function fmtNum(v: number | null | undefined, digits = 2): string {
@@ -72,6 +74,91 @@ function Section({ title, note, children }: { title: string; note?: string; chil
       {note ? <p className="mt-0.5 text-xs text-muted">{note}</p> : null}
       <div className="mt-2">{children}</div>
     </section>
+  );
+}
+
+const ENTRY_TONE: Record<BuyEntry["statusTone"], string> = {
+  up: "text-moss",
+  down: "text-clay",
+  warn: "text-brass",
+  muted: "text-muted",
+};
+
+/** Access Radar：这个代币在哪些平台可买 / 可达。库未初始化时整段隐藏；没有记录时只给一行安静的提示。 */
+function BuyEntries({ chain, address }: { chain: string; address: string }) {
+  const fn = useServerFn(fetchBuyEntries);
+  const [entries, setEntries] = useState<BuyEntry[] | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setEntries(null);
+    fn({ data: { chain, address } })
+      .then((res) => live && setEntries(res.initialized && !res.error ? res.entries : null))
+      .catch(() => live && setEntries(null));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chain, address]);
+
+  if (entries == null) return null;
+  return (
+    <Section title="买入入口" note={`Access Radar 记录的交易所 / 法币通道 / 链部署。时间 ${TZ_LABEL}；待确认 = 只按代号匹配。`}>
+      {entries.length === 0 ? (
+        <p className="text-xs text-muted">Access Radar 里还没有这个代币的入口记录</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-muted">
+                <th className="py-1 text-left font-normal">平台</th>
+                <th className="py-1 text-left font-normal">入口</th>
+                <th className="py-1 text-left font-normal">状态</th>
+                <th className="py-1 text-right font-normal">自</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.accessId} className="border-t border-line/50 align-top">
+                  <td className="py-1">
+                    <span>{e.platformName}</span>
+                    <span className="ml-1 text-[10px] text-muted">{e.platformTypeLabel}</span>
+                  </td>
+                  <td className="py-1 font-mono">
+                    {e.entryLabel}
+                    {e.resolution.status !== "CONFIRMED" ? (
+                      <span className="ml-1 text-[10px] text-brass" title={e.resolution.hint}>
+                        {e.resolution.label}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className={`py-1 ${ENTRY_TONE[e.statusTone]}`}>
+                    {e.statusLabel}
+                    {e.provisional ? <span className="ml-1 text-[10px] text-brass">待确认</span> : null}
+                    {e.warning ? (
+                      <span className="ml-1 text-[10px] text-brass" title="交易所警示（유의 종목），仍可交易">
+                        警示
+                      </span>
+                    ) : null}
+                    {e.pendingRemovalAt ? (
+                      <span className="ml-1 text-[10px] text-clay" title={fmtTs8Full(e.pendingRemovalAt)}>
+                        {fmtTs8(e.pendingRemovalAt)} 下架
+                      </span>
+                    ) : null}
+                  </td>
+                  <td
+                    className="py-1 text-right font-mono text-muted"
+                    title={e.sinceIsBaseline ? "首次采集时就已存在，真实上线时间未知" : fmtTs8Full(e.statusSince)}
+                  >
+                    {e.sinceIsBaseline ? `≤${fmtTs8(e.statusSince)}` : fmtTs8(e.statusSince)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -232,6 +319,8 @@ export function TokenDetailDrawer({ chain, address, onClose }: { chain: string; 
             </Section>
           </>
         ) : null}
+
+        <BuyEntries chain={chain} address={address} />
       </aside>
     </div>
   );
