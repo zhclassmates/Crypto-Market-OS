@@ -1,0 +1,9 @@
+# Access Radar local artefacts (also covered by the root .gitignore)
+__pycache__/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+logs/
+*.lock
+.DS_Store
