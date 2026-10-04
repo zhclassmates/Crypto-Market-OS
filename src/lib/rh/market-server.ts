@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   displayCreated,
   formalStreakEligible,
+  canonicalWindowEndTs,
   officialDailyMetrics,
   parseDays,
   streakBoardEligible,
@@ -16,6 +17,20 @@ import {
   type QualityFlag,
   type StreakStatus,
 } from "./streak.ts";
+import {
+  dailyReturnsFromFinalized,
+  latestFinalizedDates,
+  type DailyReturnMap,
+} from "./daily-filter.ts";
+import {
+  EARLY_TIER_SQL,
+  MAIN_MIN_LIQUIDITY,
+  SNAPSHOT_LIQ_SQL,
+  readMarketInclusionStats,
+  readMarketTierStats,
+  type MarketInclusionStats,
+  type MarketTierStats,
+} from "./market-stats.ts";
 
 export interface MarketEligibility {
   days: number;
@@ -26,7 +41,8 @@ export interface MarketEligibility {
   finalEligible: number;
 }
 
-const DB_PATH = join(
+// RH_MARKET_DB 只用于离线验证（指向数据库副本）；默认仍是生产库。
+const DB_PATH = process.env.RH_MARKET_DB || join(
   dirname(fileURLToPath(import.meta.url)),
   "../../../rh_v2/market.sqlite",
 );
@@ -46,12 +62,51 @@ interface RankedToken {
   klineFetchedAt: number | null;
   price: string;
   pc24h: string | null; // GMGN 滚动 24h 涨幅，小数
+  pc24hSource: string | null; // 写入 pc_24h 的发现源；trending = 明确 --interval 24h
+  pcInterval: string | null; // "24h" 或 null（窗口未确认 / legacy）
   volume24h: string;
   liquidity: string;
   marketCap: string;
   holders: number | null;
+  priceSource: string | null;
+  priceUpdatedAt: number | null;
+  volume24hSource: string | null;
+  volume24hUpdatedAt: number | null;
+  liquiditySource: string | null;
+  marketCapSource: string | null;
+  marketCapUpdatedAt: number | null;
+  holdersSource: string | null;
+  holdersUpdatedAt: number | null;
+  securityUpdatedAt: number | null;
+  securityIsHoneypot: boolean | null;
+  securityIsBlacklist: boolean | null;
+  securityIsOpenSource: boolean | null;
+  securityIsRenounced: boolean | null;
+  securityTop10HolderRate: string | null;
+  // V1 字段底座。null = 尚未观察到 / endpoint 不提供；0 是合法值。
+  swaps24h: number | null; // 24h 交易笔数（buys + sells），不是钱包数
+  buys24h: number | null; // 24h 买入笔数，不是独立买家数
+  sells24h: number | null; // 24h 卖出笔数，不是独立卖家数
+  activitySource: string | null;
+  activityUpdatedAt: number | null;
+  pc1h: string | null; // GMGN price_change_percent1h（Trending/Hot）
+  pc1hUpdatedAt: number | null;
+  isWashTrading: boolean | null;
+  securityRenouncedMint: boolean | null;
+  securityRenouncedFreezeAccount: boolean | null;
+  securitySellTax: string | null; // 原样字符串，刻度未编码
+  trendingRank: number | null; // 最近 24h 内最新一次 Trending 名次；null = 未在榜
+  trendingRankAt: number | null;
+  trendingRankContext: string | null; // endpoint/interval，名次只在同一上下文内可比
+  hotRank: number | null;
+  hotRankAt: number | null;
+  hotRankContext: string | null;
+  lastSignalType: string | null; // GMGN signal_type 原始代码，含义未编码
+  lastSignalTriggerAt: number | null;
+  lastSignalTriggerMc: number | null;
   changeNd: number | null; // 已定稿 UTC 日 K 的 N 日累计。不是滚动 24H，也不是日K
   change1d: number | null; // 日K：最近两根已定稿日 K 的收盘比。closed_daily_change
+  dailyReturns: DailyReturnMap;
   streak: number | null;
   streakStatus: StreakStatus;
   streakReturn: number | null;
@@ -59,7 +114,6 @@ interface RankedToken {
   closedCandles: number;
   lastDailyStatus: DailyStatus | null;
   qualityFlags: QualityFlag[];
-  spark: number[] | null; // 最近 24 个整点美元价
   priceDs: string | null;
   volumeDs: string | null;
   liquidityDs: string | null;
@@ -94,6 +148,89 @@ function openReadDb(): DatabaseSync {
 
 function flag(v: unknown): boolean {
   return Number(v || 0) === 1;
+}
+
+function nullableFlag(v: unknown): boolean | null {
+  return v == null ? null : Number(v) === 1;
+}
+
+function optionalSnapshotSelect(db: DatabaseSync): string {
+  const cols = db.prepare("PRAGMA table_info(token_snapshot)").all() as unknown as { name: string }[];
+  const names = new Set(cols.map((c) => c.name));
+  const wanted = [
+    "price_source", "price_updated_at", "pc_24h_source", "volume_24h_source", "volume_24h_updated_at",
+    "liquidity_source", "market_cap_source", "market_cap_updated_at",
+    "holders_source", "holders_updated_at", "security_updated_at",
+    "security_is_honeypot", "security_is_blacklist", "security_is_open_source",
+    "security_is_renounced", "security_top10_holder_rate",
+    "swaps", "swaps_source", "swaps_updated_at",
+    "buys_24h", "sells_24h", "pc_1h", "pc_1h_updated_at", "is_wash_trading",
+    "security_renounced_mint", "security_renounced_freeze_account", "security_sell_tax",
+  ];
+  return wanted.map((name) => names.has(name) ? `s.${name}` : `NULL AS ${name}`).join(", ");
+}
+
+interface LatestEvents {
+  trendingRank: number | null;
+  trendingRankAt: number | null;
+  trendingRankContext: string | null;
+  hotRank: number | null;
+  hotRankAt: number | null;
+  hotRankContext: string | null;
+  lastSignalType: string | null;
+  lastSignalTriggerAt: number | null;
+  lastSignalTriggerMc: number | null;
+}
+
+/** 最近 24h 每个 token 每个来源的最新一条发现事件。没有事件 = 未在榜，不是名次 0。 */
+function loadLatestEvents(db: DatabaseSync, now: number): Map<string, LatestEvents> {
+  const rows = db
+    .prepare(
+      `WITH x AS (
+         SELECT chain, address, source, source_variant, rank, seen_at, metadata_json,
+                ROW_NUMBER() OVER (PARTITION BY chain, address, source ORDER BY seen_at DESC, id DESC) AS rn
+         FROM discovery_event
+         WHERE source IN ('trending', 'hot', 'signal') AND seen_at >= ?
+       )
+       SELECT chain, address, source, source_variant, rank, seen_at,
+              json_extract(metadata_json, '$.trigger_at') AS trigger_at,
+              json_extract(metadata_json, '$.trigger_mc') AS trigger_mc
+       FROM x WHERE rn = 1`,
+    )
+    .all(now - 86400) as unknown as {
+    chain: string;
+    address: string;
+    source: string;
+    source_variant: string | null;
+    rank: number | null;
+    seen_at: number;
+    trigger_at: number | null;
+    trigger_mc: number | null;
+  }[];
+  const out = new Map<string, LatestEvents>();
+  for (const r of rows) {
+    const key = `${r.chain}:${r.address}`;
+    const e = out.get(key) ?? {
+      trendingRank: null, trendingRankAt: null, trendingRankContext: null,
+      hotRank: null, hotRankAt: null, hotRankContext: null,
+      lastSignalType: null, lastSignalTriggerAt: null, lastSignalTriggerMc: null,
+    };
+    if (r.source === "trending") {
+      e.trendingRank = r.rank;
+      e.trendingRankAt = r.seen_at;
+      e.trendingRankContext = `trending/${r.source_variant || "?"}`;
+    } else if (r.source === "hot") {
+      e.hotRank = r.rank;
+      e.hotRankAt = r.seen_at;
+      e.hotRankContext = "hot-searches/默认参数";
+    } else if (r.source === "signal") {
+      e.lastSignalType = r.source_variant || null;
+      e.lastSignalTriggerAt = r.trigger_at == null ? null : Number(r.trigger_at);
+      e.lastSignalTriggerMc = r.trigger_mc == null ? null : Number(r.trigger_mc);
+    }
+    out.set(key, e);
+  }
+  return out;
 }
 
 export interface GmgnClock {
@@ -165,13 +302,6 @@ function loadDailyBars(db: DatabaseSync): Map<string, DailyBar[]> {
   return out;
 }
 
-function sparkline(stmt: StatementSync, chain: string, address: string, now: number): number[] | null {
-  const since = now - now % 3600 - 24 * 3600;
-  const rows = stmt.all(chain, address, since) as unknown as { price: string }[];
-  if (rows.length < 2) return null;
-  return rows.map((r) => Number(r.price)).filter((n) => isFinite(n) && n > 0);
-}
-
 /**
  * 没有日 K、池子也不到连涨门槛的币进不了任何一个榜，不往前端送。
  * 全市场 7000+ 个币里大多是这种，整表下发会让接口和页面都卡住。
@@ -179,7 +309,7 @@ function sparkline(stmt: StatementSync, chain: string, address: string, now: num
 const BOARD_PREFILTER = `(t.kline_fetched_at IS NOT NULL OR s.liquidity_num >= ${STREAK_MIN_LIQUIDITY})`;
 
 function keySet(keys: string[] | undefined): Set<string> | null {
-  return keys ? new Set(keys) : null;
+  return keys ? new Set(keys.map((k) => k.toLowerCase())) : null;
 }
 
 function readMeta(db: DatabaseSync, k: string): string | null {
@@ -208,6 +338,11 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{
     ok: boolean;
     tokens: RankedToken[];
+    dailyDates?: string[];
+    /** N 日窗口终点：UTC 昨天（canonical_window_end）。 */
+    ndWindowEnd?: string | null;
+    inclusionStats?: MarketInclusionStats;
+    tierStats?: MarketTierStats;
     days?: number;
     eligibility?: MarketEligibility;
     /** 名册总数。没下发的是日K不足 N+1 根、池深也不到连涨门槛的币。 */
@@ -228,10 +363,11 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
       const days = parseDays(data.days);
       const watch = keySet(data.keys);
       const bars = loadDailyBars(db);
-      const sparkStmt = db.prepare(
-        "SELECT price FROM hourly_price WHERE chain=? AND address=? AND ts >= ? ORDER BY ts ASC",
-      );
-      const registryCount = (db.prepare("SELECT COUNT(*) AS n FROM token_registry").get() as { n: number }).n;
+      const optionalSnapshot = optionalSnapshotSelect(db);
+      const latestEvents = loadLatestEvents(db, now);
+      const inclusionStats = readMarketInclusionStats(db, now);
+      const tierStats = readMarketTierStats(db);
+      const registryCount = inclusionStats.totalTokens;
       const eligibility = emptyEligibility(days, registryCount);
 
       const tokens = db
@@ -250,16 +386,11 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
                   s.halt, s.market_closed, s.oracle_price, s.oracle_updated_at,
                   s.commit_ok, s.chg_price, s.chg_volume, s.chg_liquidity,
                   s.liquidity_num, s.liquidity_updated_at,
-                  r.liquidity_50k_observation_type, r.qualified_at,
-                  m.return_2d, m.return_3d, m.return_5d
+                  ${optionalSnapshot},
+                  r.liquidity_50k_observation_type, r.qualified_at
            FROM token_registry r
            LEFT JOIN tokens t ON t.chain = r.chain AND t.address = r.address
            LEFT JOIN token_snapshot s ON s.chain = r.chain AND s.address = r.address
-           LEFT JOIN daily_metrics m ON m.chain = r.chain AND m.address = r.address
-             AND m.as_of_date = (
-               SELECT MAX(m2.as_of_date) FROM daily_metrics m2
-               WHERE m2.chain = r.chain AND m2.address = r.address
-             )
            ${watch ? "" : `WHERE ${BOARD_PREFILTER}`}`,
         )
         .all() as unknown as {
@@ -279,6 +410,33 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
         liquidity: string;
         market_cap: string;
         holders: number | null;
+        price_source: string | null;
+        price_updated_at: number | null;
+        pc_24h_source: string | null;
+        volume_24h_source: string | null;
+        volume_24h_updated_at: number | null;
+        liquidity_source: string | null;
+        market_cap_source: string | null;
+        market_cap_updated_at: number | null;
+        holders_source: string | null;
+        holders_updated_at: number | null;
+        security_updated_at: number | null;
+        security_is_honeypot: number | null;
+        security_is_blacklist: number | null;
+        security_is_open_source: number | null;
+        security_is_renounced: number | null;
+        security_top10_holder_rate: string | null;
+        swaps: number | null;
+        swaps_source: string | null;
+        swaps_updated_at: number | null;
+        buys_24h: number | null;
+        sells_24h: number | null;
+        pc_1h: string | null;
+        pc_1h_updated_at: number | null;
+        is_wash_trading: number | null;
+        security_renounced_mint: number | null;
+        security_renounced_freeze_account: number | null;
+        security_sell_tax: string | null;
         price_ds: string | null;
         volume_ds: string | null;
         liquidity_ds: string | null;
@@ -300,19 +458,24 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
         liquidity_updated_at: number | null;
         liquidity_50k_observation_type: string | null;
         qualified_at: number | null;
-        return_2d: number | null;
-        return_3d: number | null;
-        return_5d: number | null;
       }[];
 
       const ranked: RankedToken[] = [];
+      const finalizedDates = new Set<string>();
+      const windowEndTs = canonicalWindowEndTs(now);
       for (const t of tokens) {
-        if (watch && !watch.has(`${t.chain}:${t.address}`)) continue;
+        if (watch && !watch.has(`${t.chain}:${t.address}`.toLowerCase())) continue;
         const tokenCreatedAt = t.token_created_at ?? null;
         const pairCreatedAt = t.pair_created_at ?? null;
         const created = displayCreated(tokenCreatedAt, pairCreatedAt);
         const tokenBars = bars.get(`${t.chain}:${t.address}`) ?? [];
-        const metrics = officialDailyMetrics(tokenBars, now, created.at, days);
+        // 日期列只看相邻两根 FINALIZED 日K 是否都在；created_at 偶尔晚于真实首根有量日K，不参与判断。
+        const dailySeries = dailyReturnsFromFinalized(tokenBars, now, null);
+        for (const date of dailySeries.dates) finalizedDates.add(date);
+        const metrics = officialDailyMetrics(tokenBars, now, created.at, days, windowEndTs);
+        const return2d = officialDailyMetrics(tokenBars, now, created.at, 2, windowEndTs).changeNd;
+        const return3d = officialDailyMetrics(tokenBars, now, created.at, 3, windowEndTs).changeNd;
+        const return5d = officialDailyMetrics(tokenBars, now, created.at, 5, windowEndTs).changeNd;
         const changeNd = metrics.changeNd;
         const liq = t.liquidity_num ?? t.liquidity;
         const liqAge = t.liquidity_updated_at == null ? null : now - t.liquidity_updated_at;
@@ -343,12 +506,46 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
           pc24h: t.pc_24h != null && t.pc_24h !== "" && isFinite(Number(t.pc_24h))
             ? String(Number(t.pc_24h) / 100)
             : null,
+          pc24hSource: t.pc_24h_source ?? null,
+          pcInterval: t.pc_24h_source === "trending" ? "24h" : null,
           volume24h: t.volume_24h ?? "",
           liquidity: t.liquidity_num != null ? String(t.liquidity_num) : (t.liquidity ?? ""),
           marketCap: t.market_cap ?? "",
           holders: t.holders,
+          priceSource: t.price_source,
+          priceUpdatedAt: t.price_updated_at,
+          volume24hSource: t.volume_24h_source,
+          volume24hUpdatedAt: t.volume_24h_updated_at,
+          liquiditySource: t.liquidity_source,
+          marketCapSource: t.market_cap_source,
+          marketCapUpdatedAt: t.market_cap_updated_at,
+          holdersSource: t.holders_source,
+          holdersUpdatedAt: t.holders_updated_at,
+          securityUpdatedAt: t.security_updated_at,
+          securityIsHoneypot: nullableFlag(t.security_is_honeypot),
+          securityIsBlacklist: nullableFlag(t.security_is_blacklist),
+          securityIsOpenSource: nullableFlag(t.security_is_open_source),
+          securityIsRenounced: nullableFlag(t.security_is_renounced),
+          securityTop10HolderRate: t.security_top10_holder_rate,
+          swaps24h: t.swaps ?? null,
+          buys24h: t.buys_24h ?? null,
+          sells24h: t.sells_24h ?? null,
+          activitySource: t.swaps_source ?? null,
+          activityUpdatedAt: t.swaps_updated_at ?? null,
+          pc1h: t.pc_1h ?? null,
+          pc1hUpdatedAt: t.pc_1h_updated_at ?? null,
+          isWashTrading: nullableFlag(t.is_wash_trading),
+          securityRenouncedMint: nullableFlag(t.security_renounced_mint),
+          securityRenouncedFreezeAccount: nullableFlag(t.security_renounced_freeze_account),
+          securitySellTax: t.security_sell_tax ?? null,
+          ...(latestEvents.get(`${t.chain}:${t.address}`) ?? {
+            trendingRank: null, trendingRankAt: null, trendingRankContext: null,
+            hotRank: null, hotRankAt: null, hotRankContext: null,
+            lastSignalType: null, lastSignalTriggerAt: null, lastSignalTriggerMc: null,
+          }),
           changeNd,
           change1d: metrics.change1d,
+          dailyReturns: dailySeries.returns,
           streak: metrics.streak,
           streakStatus: metrics.streakStatus,
           streakReturn: metrics.streakReturn,
@@ -356,7 +553,6 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
           closedCandles: metrics.closedCount,
           lastDailyStatus: metrics.lastStatus,
           qualityFlags: metrics.qualityFlags,
-          spark: sparkline(sparkStmt, t.chain, t.address, now),
           priceDs: t.price_ds,
           volumeDs: t.volume_ds,
           liquidityDs: t.liquidity_ds,
@@ -378,9 +574,11 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
           liquidityUpdatedAt: t.liquidity_updated_at ?? null,
           observationType: t.liquidity_50k_observation_type ?? null,
           qualifiedAt: t.qualified_at ?? null,
-          return2d: t.return_2d == null ? null : Number(t.return_2d),
-          return3d: t.return_3d == null ? null : Number(t.return_3d),
-          return5d: t.return_5d == null ? null : Number(t.return_5d),
+          // Materialized daily_metrics may cross UTC midnight without a write.
+          // API consumers always get the same request-time finalized-candle contract as changeNd.
+          return2d,
+          return3d,
+          return5d,
         });
       }
 
@@ -402,10 +600,15 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
       const gmgn = readGmgnClocks(db);
       db.close();
       eligibility.finalEligible = eligibility.enoughCandleHistory;
+      const dailyDates = latestFinalizedDates(finalizedDates);
 
       return {
         ok: true,
         tokens: ranked,
+        dailyDates,
+        ndWindowEnd: windowEndTs == null ? null : new Date(windowEndTs * 1000).toISOString().slice(0, 10),
+        inclusionStats,
+        tierStats,
         days,
         eligibility,
         registryCount,
@@ -449,6 +652,11 @@ export interface HotToken {
   chgLiquidity: boolean;
   liquidityNum: number | null;
   liquidityUpdatedAt: number | null;
+  priceSource: string | null;
+  priceUpdatedAt: number | null;
+  volume24hSource: string | null;
+  volume24hUpdatedAt: number | null;
+  liquiditySource: string | null;
 }
 
 /** 只读当前榜快照的热列，不扫日 K / 小时价。 */
@@ -464,10 +672,12 @@ export const fetchMarketHot = createServerFn({ method: "POST" })
     if (!existsSync(DB_PATH)) return { ok: false, tokens: [], gmgn: {}, error: "数据库不存在" };
     const watch = keySet(data.keys);
     const db = openReadDb();
+    const optionalSnapshot = optionalSnapshotSelect(db);
     const rows = db
       .prepare(
         `SELECT s.chain, s.address, s.price, s.volume_24h, s.liquidity, s.liquidity_num,
                 s.liquidity_updated_at,
+                ${optionalSnapshot},
                 s.price_ds, s.volume_ds, s.liquidity_ds, s.dex_price, s.diverge,
                 s.anchor_bid, s.anchor_ask, s.anchor_generated_at, s.anchor_multiplier,
                 s.halt, s.market_closed, s.oracle_price, s.oracle_updated_at,
@@ -478,7 +688,7 @@ export const fetchMarketHot = createServerFn({ method: "POST" })
          ${watch ? "" : `WHERE ${BOARD_PREFILTER}`}`,
       )
       .all() as unknown as Record<string, string | number | null>[];
-    const kept = watch ? rows.filter((t) => watch.has(`${t.chain}:${t.address}`)) : rows;
+    const kept = watch ? rows.filter((t) => watch.has(`${t.chain}:${t.address}`.toLowerCase())) : rows;
     const tokens: HotToken[] = kept.map((t) => ({
       chain: String(t.chain),
       address: String(t.address),
@@ -487,6 +697,11 @@ export const fetchMarketHot = createServerFn({ method: "POST" })
       liquidity: t.liquidity_num != null ? String(t.liquidity_num) : String(t.liquidity ?? ""),
       liquidityNum: t.liquidity_num == null ? null : Number(t.liquidity_num),
       liquidityUpdatedAt: (t.liquidity_updated_at as number | null) ?? null,
+      priceSource: (t.price_source as string | null) ?? null,
+      priceUpdatedAt: (t.price_updated_at as number | null) ?? null,
+      volume24hSource: (t.volume_24h_source as string | null) ?? null,
+      volume24hUpdatedAt: (t.volume_24h_updated_at as number | null) ?? null,
+      liquiditySource: (t.liquidity_source as string | null) ?? null,
       priceDs: (t.price_ds as string | null) ?? null,
       volumeDs: (t.volume_ds as string | null) ?? null,
       liquidityDs: (t.liquidity_ds as string | null) ?? null,
@@ -512,3 +727,102 @@ export const fetchMarketHot = createServerFn({ method: "POST" })
     return { ok: false, tokens: [], gmgn: {}, error: e instanceof Error ? e.message : String(e) };
   }
 });
+
+export interface EarlyToken {
+  chain: string;
+  address: string;
+  symbol: string | null;
+  name: string | null;
+  logo: string | null;
+  price: string | null;
+  pc24h: string | null;
+  liquidity: number;
+  liquidityUpdatedAt: number | null;
+  /** 约 24 小时前最后一次 discovery_event 里记录的流动性；没有就是 null。 */
+  liquidity24hAgo: number | null;
+  volume24h: number | null;
+  buys24h: number | null;
+  sells24h: number | null;
+  swaps24h: number | null;
+  holders: number | null;
+  createdAt: number | null;
+  firstSeenAt: number | null;
+  /** 50000 - liquidity */
+  toMain: number;
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** EARLY 观察池：只读 registry + snapshot + discovery_event，不碰日 K。 */
+export const fetchMarketEarly = createServerFn({ method: "POST" })
+  .validator(z.object({}).optional())
+  .handler(async (): Promise<{
+    ok: boolean;
+    tokens: EarlyToken[];
+    inclusionStats?: MarketInclusionStats;
+    tierStats?: MarketTierStats;
+    error?: string;
+  }> => {
+    try {
+      if (!existsSync(DB_PATH)) return { ok: false, tokens: [], error: "数据库不存在" };
+      const db = openReadDb();
+      const now = Math.floor(Date.now() / 1000);
+      const optionalSnapshot = optionalSnapshotSelect(db);
+      const rows = db
+        .prepare(
+          `SELECT r.chain, r.address,
+                  COALESCE(t.symbol, r.symbol) AS symbol,
+                  COALESCE(t.name, r.name) AS name,
+                  t.logo,
+                  COALESCE(t.token_created_at, r.token_created_at, t.creation_ts, t.pair_created_at) AS created_at,
+                  r.first_seen_at,
+                  s.price, s.pc_24h, s.volume_24h, s.holders,
+                  ${SNAPSHOT_LIQ_SQL} AS liq,
+                  COALESCE(s.liquidity_updated_at, s.ts) AS liq_at,
+                  ${optionalSnapshot},
+                  (SELECT e.liquidity FROM discovery_event e
+                    WHERE e.chain = r.chain AND e.address = r.address
+                      AND e.seen_at <= ? AND e.liquidity IS NOT NULL
+                    ORDER BY e.seen_at DESC LIMIT 1) AS liq_24h_ago
+           FROM token_registry r
+           JOIN token_snapshot s ON s.chain = r.chain AND s.address = r.address
+           LEFT JOIN tokens t ON t.chain = r.chain AND t.address = r.address
+           WHERE ${EARLY_TIER_SQL}
+           ORDER BY liq DESC`,
+        )
+        .all(now - 86_400) as unknown as Record<string, string | number | null>[];
+      const inclusionStats = readMarketInclusionStats(db, now);
+      const tierStats = readMarketTierStats(db);
+      db.close();
+      const tokens: EarlyToken[] = rows.map((t) => {
+        const liquidity = Number(t.liq);
+        return {
+          chain: String(t.chain),
+          address: String(t.address),
+          symbol: (t.symbol as string | null) ?? null,
+          name: (t.name as string | null) ?? null,
+          logo: (t.logo as string | null) ?? null,
+          price: t.price == null ? null : String(t.price),
+          pc24h: t.pc_24h == null ? null : String(t.pc_24h),
+          liquidity,
+          liquidityUpdatedAt: numOrNull(t.liq_at),
+          liquidity24hAgo: numOrNull(t.liq_24h_ago),
+          volume24h: numOrNull(t.volume_24h),
+          buys24h: numOrNull(t.buys_24h),
+          sells24h: numOrNull(t.sells_24h),
+          swaps24h: numOrNull(t.swaps),
+          holders: numOrNull(t.holders),
+          createdAt: numOrNull(t.created_at),
+          firstSeenAt: numOrNull(t.first_seen_at),
+          toMain: MAIN_MIN_LIQUIDITY - liquidity,
+        };
+      });
+      return { ok: true, tokens, inclusionStats, tierStats };
+    } catch (e) {
+      return { ok: false, tokens: [], error: e instanceof Error ? e.message : String(e) };
+    }
+  });

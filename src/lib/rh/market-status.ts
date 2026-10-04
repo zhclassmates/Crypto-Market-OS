@@ -1,11 +1,12 @@
 /** 与 rh_v2/market_health.py 同一套口径。浏览器和接口都能引用。 */
+import { MARKET_CHAINS, MARKET_CHAIN_LABEL } from "./market-chains.ts";
 
 export const FAIL_THRESHOLD = 3;
 export const DIVERGE_RATIO = 0.05;
 export const GMGN_PRICE_PERIOD = 300;
 export const CHAINLINK_POLL_PERIOD = 30;
 
-export const CHAINS = ["sol", "base", "eth", "robinhood"] as const;
+export const CHAINS = MARKET_CHAINS;
 
 export const SOURCE_PERIOD: Record<string, number> = {
   gmgn: 300,
@@ -31,12 +32,7 @@ export const SOURCE_LABEL: Record<string, string> = {
   chainlink: "Chainlink",
 };
 
-export const CHAIN_LABEL: Record<string, string> = {
-  sol: "Solana",
-  base: "Base",
-  eth: "Ethereum",
-  robinhood: "Robinhood",
-};
+export const CHAIN_LABEL = MARKET_CHAIN_LABEL;
 
 export type MarketStatus =
   | "LIVE"

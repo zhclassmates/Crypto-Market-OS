@@ -11,6 +11,8 @@ import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from market_chains import MARKET_CHAINS
+
 FAIL_THRESHOLD = 3
 DIVERGE_RATIO = 0.05
 
@@ -20,7 +22,7 @@ DIVERGE_RATIO = 0.05
 # Dex 15s、锚价 15s、Chainlink 30s 不走 GMGN 冷却。
 def catalog():
     rows = []
-    for chain in ("sol", "base", "eth", "robinhood"):
+    for chain in MARKET_CHAINS:
         rows.append(("gmgn", chain, 300))
         rows.append(("gmgn_hot", chain, 120))
         rows.append(("gmgn_new_pair", chain, 300))

@@ -19,13 +19,17 @@ import {
   displayCreated,
   fmtRelativeAge,
   formalStreakEligible,
+  isPositiveStreak,
   getFinalizedDailyBars,
   hasContiguousDays,
   isCurrentDaysRequest,
   klineIsStale,
   KLINE_FETCH_WINDOW_SEC,
+  canonicalWindowEndTs,
+  ndWindowDays,
   officialDailyMetrics,
   parseDays,
+  patternFromFinalized,
   qualityFlagsFor,
   rankingQualityOk,
   returnOverClosedCandles,
@@ -175,6 +179,13 @@ describe("board rules", () => {
     assert.equal(formalStreakEligible(100_000, 1000), false);
     assert.equal(formalStreakEligible(30_000, 20), false);
     assert.equal(formalStreakEligible(100_000, null), false);
+  });
+
+  it("formal streak board only accepts a positive streak status", () => {
+    assert.equal(isPositiveStreak("POSITIVE_STREAK"), true);
+    assert.equal(isPositiveStreak("VALID_ZERO"), false);
+    assert.equal(isPositiveStreak("INSUFFICIENT_DATA"), false);
+    assert.equal(isPositiveStreak(null), false);
   });
 
   it("return over N closed candles is null when a day is missing", () => {
@@ -603,5 +614,125 @@ describe("PUMPGU regression: intraday close must not mint +1975.3%", () => {
       5,
     );
     assert.ok(((bogus.changeNd ?? 0) * 100) > 1900);
+  });
+});
+
+describe("Phase 4 UTC materialization oracle boundaries", () => {
+  const midnight = DAY0 + 4 * DAY_SEC;
+  const provisionalObservedAt = midnight - 12 * 3600;
+  const bars: DailyBar[] = [
+    bar(0, 1),
+    bar(1, 2),
+    bar(2, 3),
+    bar(3, 4, 4, provisionalObservedAt),
+  ];
+
+  it("23:59 uses only the prior finalized tail", () => {
+    const m = officialDailyMetrics(bars, midnight - 1, null, 2);
+    assert.equal(m.lastStatus, "FINALIZED");
+    assert.equal(m.streak, 2);
+    assert.equal(m.changeNd, 2);
+  });
+
+  it("00:00 and 00:01 invalidate a newly provisional tail", () => {
+    for (const now of [midnight, midnight + 60]) {
+      const m = officialDailyMetrics(bars, now, null, 2);
+      assert.equal(m.lastStatus, "PROVISIONAL");
+      assert.equal(m.streak, null);
+      assert.equal(m.changeNd, null);
+    }
+  });
+
+  it("a post-close observation publishes the new finalized result", () => {
+    const updated = bars.map((b, i) => i === 3 ? { ...b, fetchedAt: midnight + 60 } : b);
+    const m = officialDailyMetrics(updated, midnight + 60, null, 2);
+    assert.equal(m.lastStatus, "FINALIZED");
+    assert.equal(m.streak, 3);
+    assert.equal(m.changeNd, 1);
+  });
+
+  it("historical replay does not use a future finalized observation", () => {
+    const updated = bars.map((b, i) => i === 3 ? { ...b, finalizedAt: midnight + 60 } : b);
+    const m = officialDailyMetrics(updated, midnight - 1, null, 2);
+    assert.equal(m.lastStatus, "FINALIZED");
+    assert.equal(m.streak, 2);
+    assert.equal(m.changeNd, 2);
+  });
+
+  it("streak-board pattern is derived from finalized rows only", () => {
+    const finalized = getFinalizedDailyBars(bars, midnight, null);
+    assert.equal(finalized.length, 3);
+    assert.deepEqual(patternFromFinalized(finalized), {
+      pattern: "++",
+      downDays: 0,
+      flatDays: 0,
+    });
+  });
+});
+
+describe("canonical ND window", () => {
+  // D = 10/03 的 UTC 0 点；now = 10/04 03:00，10/04 日K 仍是 OPEN。
+  const D = 1_790_000_000 - (1_790_000_000 % DAY_SEC);
+  const now = D + DAY_SEC + 3 * 3600;
+  const fin = (ts: number, close: number): DailyBar => ({ ts, high: close, close, fetchedAt: ts + DAY_SEC + 60 });
+  const day = (k: number) => D + k * DAY_SEC; // k=0 → 10/03, -1 → 10/02 …
+  const end = canonicalWindowEndTs(now);
+  const nd = (bars: DailyBar[], n: number) => officialDailyMetrics(bars, now, null, n, end).changeNd;
+
+  it("10/04 OPEN → canonical end is 10/03", () => {
+    assert.equal(end, D);
+    assert.equal(barStatus({ ts: day(1), high: 1, close: 1, fetchedAt: now }, now), "OPEN");
+  });
+
+  it("canonical end is calendar-only: no token data can push or pull it", () => {
+    assert.equal(canonicalWindowEndTs(D + DAY_SEC), D);
+    assert.equal(canonicalWindowEndTs(D + 2 * DAY_SEC - 1), D);
+    // 即使某个 token 声称 10/04 已 finalized（finalizedAt 提前），它也是 OPEN，且终点不随数据变化。
+    const early = { ts: day(1), high: 9, close: 9, fetchedAt: now, finalizedAt: now };
+    assert.equal(barStatus(early, now), "OPEN");
+    assert.equal(nd([fin(day(-1), 2), fin(day(0), 3), early], 1), 3 / 2 - 1);
+  });
+
+  it("10/02 + 10/03 → 1D = close(10/03)/close(10/02) − 1", () => {
+    assert.equal(nd([fin(day(-1), 2), fin(day(0), 3)], 1), 3 / 2 - 1);
+  });
+
+  it("missing 10/03 → 1D null, no fallback to 10/02", () => {
+    assert.equal(nd([fin(day(-2), 1), fin(day(-1), 2)], 1), null);
+  });
+
+  it("10/03 present but 10/02 missing → 1D null", () => {
+    assert.equal(nd([fin(day(-2), 1), fin(day(0), 3)], 1), null);
+  });
+
+  it("10/03 only PROVISIONAL → 1D null", () => {
+    const prov = { ts: day(0), high: 3, close: 3, fetchedAt: day(0) + 3600 };
+    assert.equal(nd([fin(day(-1), 2), prov], 1), null);
+  });
+
+  it("N-day return needs exactly N+1 consecutive finalized candles ending at canonical end", () => {
+    const bars = [fin(day(-3), 1), fin(day(-2), 2), fin(day(-1), 4), fin(day(0), 8)];
+    assert.equal(nd(bars, 1), 1);
+    assert.equal(nd(bars, 2), 3);
+    assert.equal(nd(bars, 3), 7);
+    assert.equal(nd(bars, 4), null); // 只有 4 根，4D 需要 5 根
+    assert.deepEqual(ndWindowDays(end, 3), { display: [day(-2), day(-1), day(0)], required: [day(-3), day(-2), day(-1), day(0)] });
+  });
+
+  it("regression fixture sol 7Vertk…Vpump (created 10/01; 10/01–10/03 finalized; 10/04 OPEN)", () => {
+    // 真实库数据（daily_kline，fetched/finalized 10/04 00:07 UTC）。日期平移到测试用的 D。
+    const fetched = day(1) + 7 * 60;
+    const bars: DailyBar[] = [
+      { ts: day(-2), high: 0.00054010872, close: 0.00011167495, fetchedAt: fetched, finalizedAt: fetched },
+      { ts: day(-1), high: 0.0053375729, close: 0.0022515295, fetchedAt: fetched, finalizedAt: fetched },
+      { ts: day(0), high: 0.021343439, close: 0.014355324, fetchedAt: fetched, finalizedAt: fetched },
+      { ts: day(1), high: 0.014800588, close: 0.013286084, fetchedAt: fetched },
+    ];
+    const createdAt = day(-2) + 3600;
+    const m = (n: number) => officialDailyMetrics(bars, now, createdAt, n, end);
+    assert.ok(Math.abs(m(1).changeNd! - (0.014355324 / 0.0022515295 - 1)) < 1e-12);
+    assert.ok(Math.abs(m(2).changeNd! - (0.014355324 / 0.00011167495 - 1)) < 1e-9);
+    assert.equal(m(3).changeNd, null); // 缺 09/30（代币 10/01 才创建）
+    assert.equal(m(1).streak, 2);
   });
 });

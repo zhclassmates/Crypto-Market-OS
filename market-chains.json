@@ -1,0 +1,34 @@
+{
+  "chains": [
+    {
+      "id": "sol",
+      "label": "Solana",
+      "dexscreener": "solana",
+      "signal": true
+    },
+    {
+      "id": "robinhood",
+      "label": "Robinhood",
+      "dexscreener": "robinhood",
+      "signal": true
+    },
+    {
+      "id": "base",
+      "label": "Base",
+      "dexscreener": "base",
+      "signal": false
+    },
+    {
+      "id": "eth",
+      "label": "Ethereum",
+      "dexscreener": "ethereum",
+      "signal": false
+    },
+    {
+      "id": "bsc",
+      "label": "BSC",
+      "dexscreener": "bsc",
+      "signal": true
+    }
+  ]
+}

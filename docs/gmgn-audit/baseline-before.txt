@@ -1,0 +1,31 @@
+observed_at 1790955363 2026-10-02 15:36:03 UTC
+heartbeat 1790955361 age 2
+cooldown [('gmgn_cooldown_until', '1790947582'), ('gmgn_cooldown_start', '1790947563'), ('gmgn_cooldown_step', '0'), ('gmgn_cooldown_basis', 'reset_at')]
+token_snapshot max_ts 1790955307 age 56 rows 11543
+token_candle rows/max_fetched [(44566, 1790955341)]
+discovery_event rows/max_seen [(125290, 1790955341)]
+   gmgn base healthy age 195
+   gmgn eth healthy age 191
+   gmgn robinhood healthy age 187
+   gmgn sol healthy age 182
+   gmgn_hot base healthy age 93
+   gmgn_hot eth healthy age 88
+   gmgn_hot robinhood healthy age 73
+   gmgn_hot sol healthy age 56
+   gmgn_kline base zero_write age 99
+   gmgn_kline eth healthy age 29
+   gmgn_kline robinhood healthy age 24
+   gmgn_kline sol healthy age 17
+   gmgn_new_pair base healthy age 178
+   gmgn_new_pair eth healthy age 121
+   gmgn_new_pair robinhood healthy age 117
+   gmgn_new_pair sol failed age 430
+   gmgn_security base healthy age 414
+   gmgn_security eth healthy age 366
+   gmgn_security robinhood healthy age 363
+   gmgn_security sol healthy age 359
+   gmgn_signal base unsupported age None
+   gmgn_signal eth unsupported age None
+   gmgn_signal robinhood healthy age 68
+   gmgn_signal sol healthy age 61
+kline.sqlite daily_kline [(31, 1790899200)]

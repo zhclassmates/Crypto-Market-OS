@@ -1,0 +1,1329 @@
+{
+ "copy": "/private/tmp/claude-501/-Users-zhaomosheng-Desktop-ctiwvGy8hZk3VdCu-grok-workspace/ffd5a232-11c1-4b08-976f-cf47a96195d4/scratchpad/v1/v1-copy3.sqlite",
+ "events_removed_from_copy": 16172,
+ "runs": [
+  {
+   "chain": "sol",
+   "endpoint": "trending",
+   "fetched_at": 1790995934
+  },
+  {
+   "chain": "sol",
+   "endpoint": "hot",
+   "fetched_at": 1790998779
+  },
+  {
+   "chain": "sol",
+   "endpoint": "trenches",
+   "fetched_at": 1790998800
+  },
+  {
+   "chain": "robinhood",
+   "endpoint": "trenches",
+   "fetched_at": 1790998821
+  },
+  {
+   "chain": "base",
+   "endpoint": "trenches",
+   "fetched_at": 1790998843
+  },
+  {
+   "chain": "eth",
+   "endpoint": "trenches",
+   "fetched_at": 1790999028
+  },
+  {
+   "chain": "sol",
+   "endpoint": "signal",
+   "fetched_at": 1790999049
+  },
+  {
+   "chain": "robinhood",
+   "endpoint": "signal",
+   "fetched_at": 1790999071
+  },
+  {
+   "chain": "sol",
+   "endpoint": "security",
+   "fetched_at": 1790999092
+  },
+  {
+   "chain": "robinhood",
+   "endpoint": "security",
+   "fetched_at": 1790999113
+  },
+  {
+   "chain": "base",
+   "endpoint": "security",
+   "fetched_at": 1790999134
+  },
+  {
+   "chain": "eth",
+   "endpoint": "security",
+   "fetched_at": 1790999155
+  },
+  {
+   "chain": "robinhood",
+   "endpoint": "trending",
+   "fetched_at": 1790999274
+  },
+  {
+   "chain": "base",
+   "endpoint": "trending",
+   "fetched_at": 1790999296
+  },
+  {
+   "chain": "eth",
+   "endpoint": "trending",
+   "fetched_at": 1790999317
+  }
+ ],
+ "integrity": "ok",
+ "checks": {
+  "sol/trending": {
+   "swaps": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "swaps.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "buys_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "buys_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "sells_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "sells_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "pc_1h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "pc_1h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "is_wash_trading": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 100,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "is_wash_trading.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "volume_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "volume_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "event.activity_meta": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "event.rank": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   }
+  },
+  "sol/hot": {
+   "swaps": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "swaps.source": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 98,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "buys_24h": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "buys_24h.source": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 98,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "sells_24h": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "sells_24h.source": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 98,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "pc_1h": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "pc_1h.source": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 98,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "is_wash_trading": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 0,
+    "raw_zero": 98,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "is_wash_trading.source": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 98,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "volume_24h": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "volume_24h.source": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 98,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "event.activity_meta": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 98,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   },
+   "event.rank": {
+    "rows": 98,
+    "raw_present": 98,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 98,
+    "mismatch": []
+   }
+  },
+  "sol/trenches": {
+   "swaps": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 0,
+    "raw_zero": 5,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "swaps.source": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 177,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "buys_24h": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 0,
+    "raw_zero": 5,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "buys_24h.source": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 177,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "sells_24h": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 0,
+    "raw_zero": 15,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "sells_24h.source": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 177,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "is_wash_trading": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 0,
+    "raw_zero": 177,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "is_wash_trading.source": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 177,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "volume_24h": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 0,
+    "raw_zero": 5,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "volume_24h.source": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 177,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   },
+   "event.activity_meta": {
+    "rows": 177,
+    "raw_present": 177,
+    "raw_null": 177,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 177,
+    "mismatch": []
+   }
+  },
+  "robinhood/trenches": {
+   "swaps": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 46,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "swaps.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "buys_24h": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 67,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "buys_24h.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "sells_24h": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 82,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "sells_24h.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "is_wash_trading": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 180,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "is_wash_trading.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "volume_24h": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 73,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "volume_24h.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "event.activity_meta": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   }
+  },
+  "base/trenches": {
+   "swaps": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 59,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "swaps.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "buys_24h": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 60,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "buys_24h.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "sells_24h": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 123,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "sells_24h.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "is_wash_trading": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 180,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "is_wash_trading.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "volume_24h": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 0,
+    "raw_zero": 59,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "volume_24h.source": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   },
+   "event.activity_meta": {
+    "rows": 180,
+    "raw_present": 180,
+    "raw_null": 180,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 180,
+    "mismatch": []
+   }
+  },
+  "eth/trenches": {
+   "swaps": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 0,
+    "raw_zero": 14,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "swaps.source": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 87,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "buys_24h": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 0,
+    "raw_zero": 15,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "buys_24h.source": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 87,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "sells_24h": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 0,
+    "raw_zero": 34,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "sells_24h.source": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 87,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "is_wash_trading": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 0,
+    "raw_zero": 87,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "is_wash_trading.source": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 87,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "volume_24h": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 0,
+    "raw_zero": 14,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "volume_24h.source": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 87,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   },
+   "event.activity_meta": {
+    "rows": 87,
+    "raw_present": 87,
+    "raw_null": 87,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 87,
+    "mismatch": []
+   }
+  },
+  "sol/signal": {
+   "event.trigger_at": {
+    "rows": 50,
+    "raw_present": 50,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 50,
+    "mismatch": []
+   },
+   "event.trigger_mc": {
+    "rows": 50,
+    "raw_present": 50,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 50,
+    "mismatch": []
+   }
+  },
+  "robinhood/signal": {
+   "event.trigger_at": {
+    "rows": 45,
+    "raw_present": 45,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 45,
+    "mismatch": []
+   },
+   "event.trigger_mc": {
+    "rows": 45,
+    "raw_present": 45,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 45,
+    "mismatch": []
+   },
+   "event.collapsed_same_type_in_bucket": {
+    "rows": 5,
+    "raw_present": 5,
+    "raw_null": 5,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 5,
+    "mismatch": []
+   }
+  },
+  "sol/security": {
+   "security_is_honeypot": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 1,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_renounced_mint": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 1,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_renounced_freeze_account": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 1,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_sell_tax": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   }
+  },
+  "robinhood/security": {
+   "security_is_honeypot": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_renounced_mint": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_renounced_freeze_account": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_sell_tax": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   }
+  },
+  "base/security": {
+   "security_is_honeypot": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_renounced_mint": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_renounced_freeze_account": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_sell_tax": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   }
+  },
+  "eth/security": {
+   "security_is_honeypot": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_renounced_mint": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_renounced_freeze_account": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   },
+   "security_sell_tax": {
+    "rows": 1,
+    "raw_present": 1,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 1,
+    "mismatch": []
+   }
+  },
+  "robinhood/trending": {
+   "swaps": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "swaps.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "buys_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "buys_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "sells_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "sells_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "pc_1h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 3,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "pc_1h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "is_wash_trading": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 100,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "is_wash_trading.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "volume_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "volume_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "event.activity_meta": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "event.rank": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   }
+  },
+  "base/trending": {
+   "swaps": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "swaps.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "buys_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "buys_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "sells_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "sells_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "pc_1h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 4,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "pc_1h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "is_wash_trading": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 100,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "is_wash_trading.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "volume_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "volume_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "event.activity_meta": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "event.rank": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   }
+  },
+  "eth/trending": {
+   "swaps": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "swaps.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "buys_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "buys_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "sells_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "sells_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "pc_1h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 1,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "pc_1h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "is_wash_trading": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 100,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "is_wash_trading.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "volume_24h": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "volume_24h.source": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "event.activity_meta": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 100,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   },
+   "event.rank": {
+    "rows": 100,
+    "raw_present": 100,
+    "raw_null": 0,
+    "raw_zero": 0,
+    "raw_true": 0,
+    "raw_eq_db": 100,
+    "mismatch": []
+   }
+  }
+ }
+}

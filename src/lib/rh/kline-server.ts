@@ -7,6 +7,7 @@ import {
   classifyBars,
   displayCreated,
   officialDailyMetrics,
+  patternFromFinalized,
   type DailyBar,
   type DailyStatus,
 } from "./streak.ts";
@@ -61,30 +62,6 @@ function dailyKlineSql(db: DatabaseSync): string {
     "FROM tokens t JOIN daily_kline k ON k.chain = t.chain AND k.address = t.address " +
     "ORDER BY t.chain ASC, t.symbol ASC, t.address ASC, k.ts ASC"
   );
-}
-
-function patternFrom(classified: { close: number; ts: number }[]): {
-  pattern: string;
-  downDays: number;
-  flatDays: number;
-} {
-  const marks: string[] = [];
-  for (let i = 1; i < classified.length; i++) {
-    const prev = classified[i - 1]!.close;
-    const curr = classified[i]!.close;
-    if (curr > prev) marks.push("+");
-    else if (curr < prev) marks.push("-");
-    else marks.push("=");
-  }
-  const run = (target: string) => {
-    let c = 0;
-    for (let i = marks.length - 1; i >= 0; i--) {
-      if (marks[i] !== target) break;
-      c++;
-    }
-    return c;
-  };
-  return { pattern: marks.join(""), downDays: run("-"), flatDays: run("=") };
 }
 
 export const fetchKlineBoard = createServerFn({ method: "GET" }).handler(async (): Promise<{
@@ -149,7 +126,7 @@ export const fetchKlineBoard = createServerFn({ method: "GET" }).handler(async (
       };
       g.candles.push(bar);
       const classified = classifyBars([bar], now, g.createdAt)[0];
-      if (!classified || classified.status === "OPEN") continue;
+      if (!classified || classified.status !== "FINALIZED") continue;
       g.raw.push({
         chain: r.chain,
         address: r.address,
@@ -169,8 +146,11 @@ export const fetchKlineBoard = createServerFn({ method: "GET" }).handler(async (
     for (const g of groups.values()) {
       if (g.raw.length === 0) continue;
       const official = officialDailyMetrics(g.candles, now, g.createdAt, 1);
-      const calendar = classifyBars(g.candles, now, g.createdAt).filter((b) => b.status !== "OPEN");
-      const marks = patternFrom(calendar);
+      // 尾部 PROVISIONAL 时整行不发布，避免在同一行混入旧 finalized pattern
+      // 与 unavailable official streak。新 finalized candle 写入后自动恢复。
+      if (official.lastStatus !== "FINALIZED") continue;
+      const calendar = classifyBars(g.candles, now, g.createdAt).filter((b) => b.status === "FINALIZED");
+      const marks = patternFromFinalized(calendar);
       const latest = g.raw[g.raw.length - 1]!;
       tokens.push({
         chain: g.chain,

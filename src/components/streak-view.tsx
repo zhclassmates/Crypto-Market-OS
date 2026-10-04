@@ -27,6 +27,17 @@ interface TokenStreak {
   candles: Candle[];
 }
 
+function fmtCandleUsd(v: string | null | undefined): string {
+  if (v == null || String(v).trim() === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  if (n === 0) return "$0";
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+  return `$${n.toFixed(2)}`;
+}
+
 function dateStr(ts: number): string {
   return new Date(ts * 1000).toISOString().slice(0, 10);
 }
@@ -142,6 +153,7 @@ function TokenDetail({ token, days }: { token: TokenStreak; days: number }) {
               <th className="px-3 py-2 font-mono">收盘</th>
               <th className="px-3 py-2 font-mono">标记</th>
               <th className="px-3 py-2 font-mono text-right">涨跌幅</th>
+              <th className="px-3 py-2 font-mono text-right" title="GMGN 日K volume，USD 成交额（不是代币数量）。缺失显示 —，真实 0 显示 $0。">成交额</th>
             </tr>
           </thead>
           <tbody>
@@ -166,6 +178,7 @@ function TokenDetail({ token, days }: { token: TokenStreak; days: number }) {
                     {pct > 0 ? "+" : ""}
                     {pct.toFixed(2)}%
                   </td>
+                  <td className="px-3 py-2 font-mono text-xs text-right">{fmtCandleUsd(c.volume)}</td>
                 </tr>
               );
             })}

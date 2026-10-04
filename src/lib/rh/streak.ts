@@ -66,6 +66,28 @@ export interface StreakMetrics {
   qualityFlags: QualityFlag[];
 }
 
+export function patternFromFinalized(
+  finalized: { close: number; ts: number }[],
+): { pattern: string; downDays: number; flatDays: number } {
+  const marks: string[] = [];
+  for (let i = 1; i < finalized.length; i++) {
+    const prev = finalized[i - 1]!.close;
+    const curr = finalized[i]!.close;
+    if (curr > prev) marks.push("+");
+    else if (curr < prev) marks.push("-");
+    else marks.push("=");
+  }
+  const run = (target: string) => {
+    let count = 0;
+    for (let i = marks.length - 1; i >= 0; i--) {
+      if (marks[i] !== target) break;
+      count++;
+    }
+    return count;
+  };
+  return { pattern: marks.join(""), downDays: run("-"), flatDays: run("=") };
+}
+
 export function utcDayStart(now: number): number {
   return now - (now % DAY_SEC);
 }
@@ -266,11 +288,31 @@ export function rankingQualityOk(flags: readonly string[]): boolean {
   return !flags.includes("LOW_BASE") && !flags.includes("EXTREME_RETURN");
 }
 
+/**
+ * 全市场统一的 N 日窗口终点：UTC 昨天（今天的日K 还没收盘）。
+ * 只由日历决定，不看任何 token 的数据：个别 token 提前/延迟、修复队列补数，
+ * 都不能推进或回退市场日期。数据没到的 token 在这个终点上就是 incomplete。
+ */
+export function canonicalWindowEndTs(now: number): number {
+  return utcDayStart(now) - DAY_SEC;
+}
+
+/**
+ * ND = N 个涨跌日（close(D) vs close(D−1)），需要 N+1 根连续 FINALIZED 日K。
+ * display 是 N 个展示日，required 是 N+1 根所需日K。
+ */
+export function ndWindowDays(windowEndTs: number, n: number): { display: number[]; required: number[] } {
+  const required = Array.from({ length: n + 1 }, (_, i) => windowEndTs - (n - i) * DAY_SEC);
+  return { display: required.slice(1), required };
+}
+
 export function officialDailyMetrics(
   bars: DailyBar[],
   now: number,
   createdAt: number | null,
   n: number,
+  /** 给了就要求 N 日窗口恰好结束在这根日K；token 自己最后一根更早时不算完整。 */
+  windowEndTs: number | null = null,
 ): StreakMetrics & { changeNd: number | null } {
   const classified = classifyBars(bars, now, createdAt);
   const calendar = classified.filter((b) => b.status !== "OPEN");
@@ -318,7 +360,8 @@ export function officialDailyMetrics(
     }
   }
 
-  const changeNd = calcNDayReturn(finalized, n);
+  const endsOnWindow = windowEndTs == null || finalized.at(-1)?.ts === windowEndTs;
+  const changeNd = endsOnWindow ? calcNDayReturn(finalized, n) : null;
   const qualityFlags = qualityFlagsFor(finalized, change1d, changeNd, n);
   return {
     streak,
@@ -361,6 +404,11 @@ export function streakBoardEligible(liquidity: string | number | null | undefine
 
 /** 正式连涨榜还要求流动性年龄不超过 300 秒。缺年龄不合格。 */
 export const LIQUIDITY_FRESHNESS_SEC = 300;
+
+/** 连涨榜只接受真正的正连涨；VALID_ZERO 与数据不足都不合格。 */
+export function isPositiveStreak(status: StreakStatus | null | undefined): boolean {
+  return status === "POSITIVE_STREAK";
+}
 
 export function formalStreakEligible(
   liquidity: string | number | null | undefined,

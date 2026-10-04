@@ -1,0 +1,100 @@
+{
+ "requests": [
+  {
+   "name": "eth-wildebeest-info",
+   "args": [
+    "token",
+    "info",
+    "--chain",
+    "eth",
+    "--address",
+    "0x57737ded3870e43fed7d80d31e0ced3d5fb0cccc"
+   ],
+   "fetched_at": 1791012702,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 2158,
+   "independent": "eth-wildebeest-info-independent.json"
+  },
+  {
+   "name": "eth-wildebeest-pool",
+   "args": [
+    "token",
+    "pool",
+    "--chain",
+    "eth",
+    "--address",
+    "0x57737ded3870e43fed7d80d31e0ced3d5fb0cccc"
+   ],
+   "fetched_at": 1791012724,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 2367,
+   "independent": "eth-wildebeest-pool-independent.json"
+  },
+  {
+   "name": "sol-www-info",
+   "args": [
+    "token",
+    "info",
+    "--chain",
+    "sol",
+    "--address",
+    "GAwhcphCqCv5bKHmCiN4VDdNWfbXJL4npmkc8L3Q9S9H"
+   ],
+   "fetched_at": 1791012746,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 3300,
+   "independent": "sol-www-info-independent.json"
+  },
+  {
+   "name": "sol-www-pool",
+   "args": [
+    "token",
+    "pool",
+    "--chain",
+    "sol",
+    "--address",
+    "GAwhcphCqCv5bKHmCiN4VDdNWfbXJL4npmkc8L3Q9S9H"
+   ],
+   "fetched_at": 1791012770,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1615,
+   "independent": "sol-www-pool-independent.json"
+  },
+  {
+   "name": "eth-sky-info",
+   "args": [
+    "token",
+    "info",
+    "--chain",
+    "eth",
+    "--address",
+    "0x56072c95faa701256059aa122697b133aded9279"
+   ],
+   "fetched_at": 1791012791,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1521,
+   "independent": "eth-sky-info-independent.json"
+  },
+  {
+   "name": "base-toshi-info",
+   "args": [
+    "token",
+    "info",
+    "--chain",
+    "base",
+    "--address",
+    "0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4"
+   ],
+   "fetched_at": 1791012813,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 2120,
+   "independent": "base-toshi-info-independent.json"
+  }
+ ]
+}

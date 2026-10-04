@@ -1,0 +1,83 @@
+{
+ "requests": [
+  {
+   "name": "sol-token-info",
+   "args": [
+    "token",
+    "info",
+    "--chain",
+    "sol",
+    "--address",
+    "GAwhcphCqCv5bKHmCiN4VDdNWfbXJL4npmkc8L3Q9S9H"
+   ],
+   "fetched_at": 1791001862,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1563
+  },
+  {
+   "name": "eth-token-info",
+   "args": [
+    "token",
+    "info",
+    "--chain",
+    "eth",
+    "--address",
+    "0x56072c95faa701256059aa122697b133aded9279"
+   ],
+   "fetched_at": 1791001884,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 2099
+  },
+  {
+   "name": "sol-token-traders",
+   "args": [
+    "token",
+    "traders",
+    "--chain",
+    "sol",
+    "--address",
+    "GAwhcphCqCv5bKHmCiN4VDdNWfbXJL4npmkc8L3Q9S9H",
+    "--limit",
+    "100"
+   ],
+   "fetched_at": 1791001906,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1409
+  },
+  {
+   "name": "sol-token-holders",
+   "args": [
+    "token",
+    "holders",
+    "--chain",
+    "sol",
+    "--address",
+    "GAwhcphCqCv5bKHmCiN4VDdNWfbXJL4npmkc8L3Q9S9H",
+    "--limit",
+    "100"
+   ],
+   "fetched_at": 1791001927,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1706
+  },
+  {
+   "name": "sol-track-smartmoney",
+   "args": [
+    "track",
+    "smartmoney",
+    "--chain",
+    "sol",
+    "--limit",
+    "200"
+   ],
+   "fetched_at": 1791001949,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1314
+  }
+ ]
+}

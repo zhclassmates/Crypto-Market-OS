@@ -17,6 +17,11 @@ import market_db as db
 
 
 LIQUIDITY_THRESHOLD = 50000
+# EARLY 观察池下限。EARLY 只读已有 snapshot / discovery_event 事实，不进日 K 队列。
+EARLY_LIQUIDITY_FLOOR = 20000
+TIER_MAIN = "MAIN"
+TIER_EARLY = "EARLY"
+TIER_IGNORE = "IGNORE"
 LIQUIDITY_FRESHNESS_SEC = 300
 DISCOVERY_BUCKET_SEC = 300
 DAY_SEC = 86400
@@ -201,6 +206,50 @@ def apply_liquidity_observation(row, liquidity, seen_at, source):
     }
 
 
+# 当前流动性：与 pick_kline_repair 同一口径。
+SNAPSHOT_LIQ_SQL = "COALESCE(s.liquidity_num, CAST(NULLIF(s.liquidity, '') AS REAL))"
+# MAIN = 现有日 K 队列门槛：已观测到 50k、已回填，或当前流动性 >= 50k。
+# 曾经进过 MAIN 的 token 流动性回落后仍是 MAIN，不丢已回填的历史。
+MAIN_TIER_SQL = (
+    f"(r.first_liquidity_50k_at IS NOT NULL OR r.kline_backfilled_at IS NOT NULL"
+    f" OR {SNAPSHOT_LIQ_SQL} >= {LIQUIDITY_THRESHOLD})"
+)
+EARLY_TIER_SQL = (
+    f"(NOT {MAIN_TIER_SQL} AND {SNAPSHOT_LIQ_SQL} >= {EARLY_LIQUIDITY_FLOOR})"
+)
+TIER_SQL = (
+    f"CASE WHEN {MAIN_TIER_SQL} THEN '{TIER_MAIN}'"
+    f" WHEN {EARLY_TIER_SQL} THEN '{TIER_EARLY}' ELSE '{TIER_IGNORE}' END"
+)
+
+
+def liquidity_tier(reg, liquidity):
+    """MAIN / EARLY / IGNORE。派生值，不落库；和 TIER_SQL 同一规则。"""
+    if reg is not None and (_field(reg, "first_liquidity_50k_at") or _field(reg, "kline_backfilled_at")):
+        return TIER_MAIN
+    liq = as_real(liquidity)
+    if liq is None:
+        return TIER_IGNORE
+    if liq >= LIQUIDITY_THRESHOLD:
+        return TIER_MAIN
+    if liq >= EARLY_LIQUIDITY_FLOOR:
+        return TIER_EARLY
+    return TIER_IGNORE
+
+
+def tier_counts(con):
+    rows = con.execute(
+        f"""SELECT {TIER_SQL} AS tier, COUNT(*) AS n
+            FROM token_registry r
+            LEFT JOIN token_snapshot s ON s.chain=r.chain AND s.address=r.address
+            GROUP BY tier"""
+    ).fetchall()
+    out = {TIER_MAIN: 0, TIER_EARLY: 0, TIER_IGNORE: 0}
+    for row in rows:
+        out[row[0]] = row[1]
+    return out
+
+
 def formal_eligible(liquidity, age_sec):
     """正式连涨榜：流动性 >= 50000 且年龄 <= 300 秒。缺年龄不合格。"""
     liq = as_real(liquidity)
@@ -229,7 +278,10 @@ def compact_metadata(item, extra=None):
     keep = (
         "symbol", "name", "rank", "liquidity", "price", "market_cap", "usd_market_cap",
         "signal_type", "trigger_at", "creation_timestamp", "created_timestamp",
-        "launchpad_platform", "holder_count",
+        "launchpad_platform", "holder_count", "volume_24h", "swaps_24h",
+        # V1 活跃度历史：按事件保存 24h 笔数/量与 1h 涨跌（笔数不是人数）。
+        "volume", "swaps", "buys", "sells", "buys_24h", "sells_24h",
+        "price_change_percent1h", "trigger_mc",
     )
     out = {}
     if isinstance(item, dict):
@@ -381,7 +433,11 @@ def write_daily_candles(con, chain, address, rows, now):
                ON CONFLICT(chain, address, candle_open_ts) DO UPDATE SET
                  open=excluded.open, high=excluded.high, low=excluded.low,
                  close=excluded.close, volume=excluded.volume, amount=excluded.amount,
-                 fetched_at=excluded.fetched_at, is_closed=excluded.is_closed,
+                 fetched_at=excluded.fetched_at,
+                 is_closed=CASE
+                   WHEN COALESCE(excluded.finalized_at, token_candle.finalized_at) IS NOT NULL THEN 1
+                   ELSE 0
+                 END,
                  finalized_at=COALESCE(excluded.finalized_at, token_candle.finalized_at)""",
             (chain, address, opened, open_, high, low, close, volume, amount, now, finalized_at, is_closed),
         )
@@ -787,6 +843,37 @@ def refresh_metrics(con, chain, address, now, repair_qualified=False):
     }
 
 
+def daily_metrics_fresh(calculated_at, now):
+    """物化指标只在计算发生于当前 UTC 日时可直接消费。"""
+    if calculated_at is None:
+        return False
+    try:
+        calculated = int(calculated_at)
+        current = int(now)
+    except (TypeError, ValueError):
+        return False
+    return utc_day_start(current) <= calculated <= current
+
+
+def refresh_daily_metrics_for_utc_day(con, now):
+    """UTC 日切时刷新所有物化指标；同一 UTC 日重复调用是 no-op。
+
+    日切本身会把昨天的 OPEN 变为 PROVISIONAL，即使数据库没有新写入，
+    所以不能只在 token/Kline 写入时刷新。历史 replay 也按传入的 now 判定，
+    不读取墙上时钟。
+    """
+    now = int(now)
+    day = as_of_date(utc_day_start(now))
+    if db.meta_get(con, "daily_metrics_refresh_utc_day") == day:
+        return 0
+    rows = con.execute("SELECT chain, address FROM token_registry").fetchall()
+    for row in rows:
+        refresh_metrics(con, row["chain"], row["address"], now)
+    db.meta_set(con, "daily_metrics_refresh_utc_day", day)
+    db.meta_set(con, "daily_metrics_refreshed_at", str(now))
+    return len(rows)
+
+
 def parse_rank_items(data):
     if isinstance(data, dict) and isinstance(data.get("data"), dict):
         data = data["data"]
@@ -839,6 +926,21 @@ def parse_trench_items(data):
     return out
 
 
+def normalize_trench_row(row):
+    """映射 Phase 2 实测的 Trenches 24h 字段，不做任何推导。
+
+    key 缺失保持缺失，显式 null 保持 null，数值 0 保持 0。
+    """
+    if not isinstance(row, dict):
+        return {}
+    out = dict(row)
+    if "volume_24h" in row:
+        out["volume"] = row["volume_24h"]
+    if "swaps_24h" in row:
+        out["swaps"] = row["swaps_24h"]
+    return out
+
+
 def parse_signal_items(data):
     if isinstance(data, dict):
         for key in ("data", "list", "signals"):
@@ -859,17 +961,34 @@ def parse_signal_items(data):
         cur = item.get("cur_data") if isinstance(item.get("cur_data"), dict) else {}
         snap = item.get("data") if isinstance(item.get("data"), dict) else {}
         created = _created_from_item(snap) or _created_from_item(item)
-        out.append({
+        parsed = {
             "address": address,
             "symbol": item.get("symbol") or snap.get("symbol") or cur.get("symbol"),
             "name": item.get("name") or snap.get("name"),
-            "liquidity": cur.get("liquidity") if cur.get("liquidity") is not None else snap.get("liquidity"),
-            "price": item.get("price") if item.get("price") is not None else snap.get("price") or cur.get("price"),
-            "market_cap": item.get("market_cap") if item.get("market_cap") is not None else snap.get("market_cap"),
             "signal_type": item.get("signal_type"),
             "token_created_at": created,
             "rank": item.get("rank"),
-        })
+        }
+        if "liquidity" in cur:
+            parsed["liquidity"] = cur["liquidity"]
+        elif "liquidity" in snap:
+            parsed["liquidity"] = snap["liquidity"]
+        if "holder_count" in cur:
+            parsed["holder_count"] = cur["holder_count"]
+        if "top_10_holder_rate" in cur:
+            parsed["top_10_holder_rate"] = cur["top_10_holder_rate"]
+        if "market_cap" in item:
+            parsed["market_cap"] = item["market_cap"]
+        elif "market_cap" in snap:
+            parsed["market_cap"] = snap["market_cap"]
+        # 信号事件本身的时间与触发市值，只进 discovery_event 元数据。
+        if "trigger_at" in item:
+            parsed["trigger_at"] = item["trigger_at"]
+        if "trigger_mc" in item:
+            parsed["trigger_mc"] = item["trigger_mc"]
+        # Signal 的 price 路径在 Phase 2 未出现，activity 字段又是 zero-only。
+        # 它们都不是此 endpoint 的 canonical snapshot 字段。
+        out.append(parsed)
     return out
 
 
@@ -1182,6 +1301,23 @@ def migrate(con):
         ("bundler_rate", "TEXT"), ("swaps", "INTEGER"), ("commit_ok", "INTEGER"),
         ("chg_price", "INTEGER"), ("chg_volume", "INTEGER"), ("chg_liquidity", "INTEGER"),
         ("security_note", "TEXT"), ("liquidity_num", "REAL"), ("liquidity_updated_at", "INTEGER"),
+        ("price_source", "TEXT"), ("price_updated_at", "INTEGER"),
+        ("pc_24h_source", "TEXT"), ("pc_24h_updated_at", "INTEGER"),
+        ("volume_24h_source", "TEXT"), ("volume_24h_updated_at", "INTEGER"),
+        ("liquidity_source", "TEXT"), ("market_cap_source", "TEXT"),
+        ("market_cap_updated_at", "INTEGER"), ("holders_source", "TEXT"),
+        ("holders_updated_at", "INTEGER"), ("swaps_source", "TEXT"),
+        ("swaps_updated_at", "INTEGER"), ("security_json", "TEXT"),
+        ("security_updated_at", "INTEGER"), ("security_is_honeypot", "INTEGER"),
+        ("security_is_blacklist", "INTEGER"), ("security_is_open_source", "INTEGER"),
+        ("security_is_renounced", "INTEGER"), ("security_top10_holder_rate", "TEXT"),
+        ("buys_24h", "INTEGER"), ("buys_24h_source", "TEXT"), ("buys_24h_updated_at", "INTEGER"),
+        ("sells_24h", "INTEGER"), ("sells_24h_source", "TEXT"), ("sells_24h_updated_at", "INTEGER"),
+        ("pc_1h", "TEXT"), ("pc_1h_source", "TEXT"), ("pc_1h_updated_at", "INTEGER"),
+        ("is_wash_trading", "INTEGER"), ("is_wash_trading_source", "TEXT"),
+        ("is_wash_trading_updated_at", "INTEGER"),
+        ("security_renounced_mint", "INTEGER"), ("security_renounced_freeze_account", "INTEGER"),
+        ("security_sell_tax", "TEXT"),
     ):
         _ensure_column(con, "token_snapshot", col, decl)
     for col, decl in (
@@ -1265,6 +1401,7 @@ def evidence(con, now=None):
         "now": now,
         "legacy_note": db.meta_get(con, "phase1_legacy_note"),
         "registry_total": one("SELECT COUNT(*) FROM token_registry"),
+        "tiers": tier_counts(con),
         "registry_by_chain": [dict(r) for r in chains],
         "first_source": [dict(r) for r in sources],
         "multi_source": one(

@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import market_db as db
 import market_health as H
+from market_chains import DEXSCREENER_CHAINS, SIGNAL_CHAINS
 
 GMGN_GAP = 1.05
 TOP_N = int(os.environ.get("MARKET_TOP_N", "100"))
@@ -23,7 +24,7 @@ FEED_URL = os.environ.get(
     "MARKET_CHAINLINK_FEEDS",
     "https://reference-data-directory.vercel.app/feeds-robinhood-mainnet.json",
 )
-DS_CHAIN = {"sol": "solana", "base": "base", "eth": "ethereum", "robinhood": "robinhood"}
+DS_CHAIN = DEXSCREENER_CHAINS
 ROUND_SELECTOR = "0xfeaf968c"
 
 _asset_cache = {"at": 0.0, "by_addr": {}}
@@ -135,6 +136,134 @@ def _i(v):
             return None
 
 
+def _text(v):
+    return None if v is None else str(v)
+
+
+def _real(v):
+    if v is None or v == "":
+        return None
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n == n and n not in (float("inf"), float("-inf")) else None
+
+
+def _present(item, dest, *keys):
+    """返回第一个实际存在的 key；显式 null 与缺失严格分开。"""
+    for key in keys:
+        if key in item:
+            return dest, item[key]
+    return None
+
+
+def snapshot_patch(source, item):
+    """按 endpoint ownership 生成 token_snapshot patch。
+
+    dict 中没有 key = endpoint 不负责/未返回；key 存在且值为 None = API
+    明确 null；数值 0 是有效值。Signal 的 activity/price 不属于可用字段。
+    """
+    if not isinstance(item, dict):
+        return {}
+    specs = {
+        "trending": (
+            ("price", "price"), ("pc_24h", "price_change_percent"),
+            ("volume_24h", "volume"), ("liquidity", "liquidity"),
+            ("market_cap", "market_cap", "usd_market_cap"),
+            ("holders", "holder_count"), ("swaps", "swaps"),
+            ("buys_24h", "buys"), ("sells_24h", "sells"),
+            ("pc_1h", "price_change_percent1h"), ("is_wash_trading", "is_wash_trading"),
+            ("smart_degen_count", "smart_degen_count"), ("sniper_count", "sniper_count"),
+            ("renowned_count", "renowned_count"), ("top10_holder_rate", "top_10_holder_rate"),
+            ("rat_trader_rate", "rat_trader_amount_rate"), ("bundler_rate", "bundler_rate"),
+        ),
+        "hot": (
+            ("price", "price"), ("pc_24h", "price_change_percent"),
+            ("volume_24h", "volume"), ("liquidity", "liquidity"),
+            ("market_cap", "market_cap", "usd_market_cap"),
+            ("holders", "holder_count"), ("swaps", "swaps"),
+            ("buys_24h", "buys"), ("sells_24h", "sells"),
+            ("pc_1h", "price_change_percent1h"), ("is_wash_trading", "is_wash_trading"),
+            ("smart_degen_count", "smart_degen_count"), ("sniper_count", "sniper_count"),
+            ("renowned_count", "renowned_count"), ("top10_holder_rate", "top_10_holder_rate"),
+            ("rat_trader_rate", "rat_trader_amount_rate"), ("bundler_rate", "bundler_rate"),
+        ),
+        "trenches": (
+            ("price", "price"), ("volume_24h", "volume"),
+            ("liquidity", "liquidity"), ("market_cap", "market_cap", "usd_market_cap"),
+            ("holders", "holder_count"), ("swaps", "swaps"),
+            ("buys_24h", "buys_24h"), ("sells_24h", "sells_24h"),
+            ("is_wash_trading", "is_wash_trading"),
+            ("smart_degen_count", "smart_degen_count"), ("sniper_count", "sniper_count"),
+            ("renowned_count", "renowned_count"), ("top10_holder_rate", "top_10_holder_rate"),
+            ("rat_trader_rate", "rat_trader_amount_rate"), ("bundler_rate", "bundler_rate"),
+        ),
+        "signal": (
+            ("liquidity", "liquidity"), ("market_cap", "market_cap"),
+            ("holders", "holder_count"), ("top10_holder_rate", "top_10_holder_rate"),
+        ),
+    }
+    out = {}
+    for spec in specs.get(source, ()):
+        found = _present(item, spec[0], *spec[1:])
+        if found is not None:
+            out[found[0]] = found[1]
+    return out
+
+
+_SNAPSHOT_COLUMNS = {
+    "price": ("price", "price_source", "price_updated_at", "text"),
+    "pc_24h": ("pc_24h", "pc_24h_source", "pc_24h_updated_at", "text"),
+    "volume_24h": ("volume_24h", "volume_24h_source", "volume_24h_updated_at", "text"),
+    "liquidity": ("liquidity", "liquidity_source", "liquidity_updated_at", "text"),
+    "market_cap": ("market_cap", "market_cap_source", "market_cap_updated_at", "text"),
+    "holders": ("holders", "holders_source", "holders_updated_at", "int"),
+    "swaps": ("swaps", "swaps_source", "swaps_updated_at", "int"),
+    # buys/sells 是 24h 交易笔数，不是独立买家/卖家人数。
+    "buys_24h": ("buys_24h", "buys_24h_source", "buys_24h_updated_at", "int"),
+    "sells_24h": ("sells_24h", "sells_24h_source", "sells_24h_updated_at", "int"),
+    "pc_1h": ("pc_1h", "pc_1h_source", "pc_1h_updated_at", "text"),
+    "is_wash_trading": ("is_wash_trading", "is_wash_trading_source", "is_wash_trading_updated_at", "bool"),
+    "smart_degen_count": ("smart_degen_count", None, None, "int"),
+    "sniper_count": ("sniper_count", None, None, "int"),
+    "renowned_count": ("renowned_count", None, None, "int"),
+    "top10_holder_rate": ("top10_holder_rate", None, None, "text"),
+    "rat_trader_rate": ("rat_trader_rate", None, None, "text"),
+    "bundler_rate": ("bundler_rate", None, None, "text"),
+}
+
+
+def _write_snapshot_patch(con, chain, address, now, source, patch, chg_p, chg_v, chg_l):
+    con.execute(
+        "INSERT OR IGNORE INTO token_snapshot(chain,address,ts) VALUES(?,?,?)",
+        (chain, address, int(now)),
+    )
+    assignments = ["ts=?", "commit_ok=1", "chg_price=?", "chg_volume=?", "chg_liquidity=?"]
+    values = [int(now), chg_p, chg_v, chg_l]
+    for key, raw in patch.items():
+        column, source_col, updated_col, kind = _SNAPSHOT_COLUMNS[key]
+        if kind == "int":
+            value = _i(raw)
+        elif kind == "bool":
+            value = _optional_bool(raw)
+        else:
+            value = _text(raw)
+        assignments.append(f"{column}=?")
+        values.append(value)
+        if source_col:
+            assignments.extend((f"{source_col}=?", f"{updated_col}=?"))
+            values.extend((source, int(now)))
+        if key == "liquidity":
+            assignments.append("liquidity_num=?")
+            values.append(_real(raw))
+    values.extend((chain, address))
+    con.execute(
+        f"UPDATE token_snapshot SET {', '.join(assignments)} WHERE chain=? AND address=?",
+        values,
+    )
+
+
 def write_gmgn_rows(con, chain, items, now, source="trending", source_variant="24h"):
     """同一事务写 discovery_event、token_registry 和 snapshot。
 
@@ -161,27 +290,20 @@ def write_gmgn_rows(con, chain, items, now, source="trending", source_variant="2
             "FROM token_snapshot WHERE chain=? AND address=?",
             (chain, address),
         ).fetchone()
-        price, vol, liq = _s(it.get("price")), _s(it.get("volume")), _s(it.get("liquidity"))
-        holders = it.get("holder_count")
-        smart = _i(it.get("smart_degen_count"))
-        sniper = _i(it.get("sniper_count"))
-        renowned = _i(it.get("renowned_count"))
-        top10 = _s(it.get("top_10_holder_rate"))
-        rat = _s(it.get("rat_trader_amount_rate"))
-        bundler = _s(it.get("bundler_rate"))
-        chg_p = 1 if old is None or H.num_changed(old["price"], price) else 0
-        chg_v = 1 if old is None or H.num_changed(old["volume_24h"], vol) else 0
-        chg_l = 1 if old is None or H.num_changed(old["liquidity"], liq) else 0
+        patch = snapshot_patch(source, it)
+        chg_p = 1 if "price" in patch and (old is None or H.num_changed(old["price"], patch["price"])) else 0
+        chg_v = 1 if "volume_24h" in patch and (old is None or H.num_changed(old["volume_24h"], patch["volume_24h"])) else 0
+        chg_l = 1 if "liquidity" in patch and (old is None or H.num_changed(old["liquidity"], patch["liquidity"])) else 0
         if chg_p or chg_v or chg_l:
             hot += 1
         cold_hit = old is None or any((
-            (old["holders"] or None) != (holders if isinstance(holders, int) else _i(holders)),
-            (old["smart_degen_count"] or None) != smart,
-            (old["sniper_count"] or None) != sniper,
-            (old["renowned_count"] or None) != renowned,
-            H.num_changed(old["top10_holder_rate"], top10),
-            H.num_changed(old["rat_trader_rate"], rat),
-            H.num_changed(old["bundler_rate"], bundler),
+            "holders" in patch and old["holders"] != _i(patch["holders"]),
+            "smart_degen_count" in patch and old["smart_degen_count"] != _i(patch["smart_degen_count"]),
+            "sniper_count" in patch and old["sniper_count"] != _i(patch["sniper_count"]),
+            "renowned_count" in patch and old["renowned_count"] != _i(patch["renowned_count"]),
+            "top10_holder_rate" in patch and H.num_changed(old["top10_holder_rate"], patch["top10_holder_rate"]),
+            "rat_trader_rate" in patch and H.num_changed(old["rat_trader_rate"], patch["rat_trader_rate"]),
+            "bundler_rate" in patch and H.num_changed(old["bundler_rate"], patch["bundler_rate"]),
             old_tok is None or (old_tok["symbol"] or "") != (it.get("symbol") or ""),
             old_tok is None or (old_tok["name"] or "") != (it.get("name") or ""),
             old_tok is None or (old_tok["logo"] or "") != (it.get("logo") or ""),
@@ -193,38 +315,11 @@ def write_gmgn_rows(con, chain, items, now, source="trending", source_variant="2
             con, chain, address, it.get("symbol"), it.get("name"), it.get("logo") or None,
             token_created, pair_created, int(now),
         )
-        con.execute(
-            """INSERT INTO token_snapshot(
-                 chain,address,ts,price,pc_24h,volume_24h,liquidity,market_cap,holders,
-                 smart_degen_count,sniper_count,renowned_count,top10_holder_rate,
-                 rat_trader_rate,bundler_rate,swaps,commit_ok,chg_price,chg_volume,chg_liquidity,
-                 liquidity_num, liquidity_updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)
-               ON CONFLICT(chain, address) DO UPDATE SET
-                 ts=excluded.ts, price=excluded.price, pc_24h=excluded.pc_24h,
-                 volume_24h=excluded.volume_24h, liquidity=excluded.liquidity,
-                 market_cap=excluded.market_cap, holders=excluded.holders,
-                 smart_degen_count=excluded.smart_degen_count,
-                 sniper_count=excluded.sniper_count, renowned_count=excluded.renowned_count,
-                 top10_holder_rate=excluded.top10_holder_rate,
-                 rat_trader_rate=excluded.rat_trader_rate, bundler_rate=excluded.bundler_rate,
-                 swaps=excluded.swaps, commit_ok=1,
-                 chg_price=excluded.chg_price, chg_volume=excluded.chg_volume,
-                 chg_liquidity=excluded.chg_liquidity,
-                 liquidity_num=excluded.liquidity_num,
-                 liquidity_updated_at=excluded.liquidity_updated_at""",
-            (
-                chain, address, int(now), price, _s(it.get("price_change_percent")),
-                vol, liq, _s(it.get("market_cap") if it.get("market_cap") is not None else it.get("usd_market_cap")),
-                holders if isinstance(holders, int) else _i(holders),
-                smart, sniper, renowned, top10, rat, bundler, _i(it.get("swaps")),
-                chg_p, chg_v, chg_l, R.as_real(it.get("liquidity")), int(now),
-            ),
-        )
-        if it.get("price") is not None:
+        _write_snapshot_patch(con, chain, address, now, source, patch, chg_p, chg_v, chg_l)
+        if "price" in patch and patch["price"] is not None:
             con.execute(
                 "INSERT OR REPLACE INTO hourly_price(chain,address,ts,price) VALUES(?,?,?,?)",
-                (chain, address, M.bucket_floor(int(now)), price),
+                (chain, address, M.bucket_floor(int(now)), str(patch["price"])),
             )
         R.refresh_metrics(con, chain, address, now)
         got += 1
@@ -289,7 +384,7 @@ def apply_trench_payload(con, chain, data, now):
     import market_research as R
     items = []
     for variant, row in R.parse_trench_items(data):
-        item = dict(row)
+        item = R.normalize_trench_row(row)
         item["_variant"] = variant
         if item.get("market_cap") is None and item.get("usd_market_cap") is not None:
             item["market_cap"] = item.get("usd_market_cap")
@@ -356,8 +451,7 @@ def _count_list(data, key):
 
 # 显式请求三类。不传 --launchpad-platform：CLI 不带该字段，覆盖取决于服务端默认，未验证。
 TRENCH_TYPES = ("new_creation", "near_completion", "completed")
-# signal CLI 只接受这些链。base / eth 记 unsupported，不发请求，也不写成失败。
-SIGNAL_CHAINS = {"sol", "robinhood"}
+# signal CLI 只对共享链配置中标记支持的链发请。
 
 
 def job_new_pair(chain):
@@ -537,6 +631,51 @@ def job_kline(chain):
     )
 
 
+def _optional_bool(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 0
+    return None
+
+
+def write_security_snapshot(con, chain, address, data, now):
+    """保留 security endpoint 的原始语义，不折叠 boolean/number aliases。"""
+    if not isinstance(data, dict):
+        raise ValueError("security payload must be an object")
+    blob = json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(blob.encode()).hexdigest()[:16]
+    old = con.execute(
+        "SELECT security_note FROM token_snapshot WHERE chain=? AND address=?",
+        (chain, address),
+    ).fetchone()
+    changed = 0 if old and old["security_note"] == digest else 1
+    con.execute(
+        """UPDATE token_snapshot SET
+             security_note=?, security_json=?, security_updated_at=?,
+             security_is_honeypot=?, security_is_blacklist=?,
+             security_is_open_source=?, security_is_renounced=?,
+             security_top10_holder_rate=?,
+             security_renounced_mint=?, security_renounced_freeze_account=?,
+             security_sell_tax=?
+           WHERE chain=? AND address=?""",
+        (
+            digest, blob, int(now),
+            _optional_bool(data.get("is_honeypot")) if "is_honeypot" in data else None,
+            _optional_bool(data.get("is_blacklist")) if "is_blacklist" in data else None,
+            _optional_bool(data.get("is_open_source")) if "is_open_source" in data else None,
+            _optional_bool(data.get("is_renounced")) if "is_renounced" in data else None,
+            _text(data.get("top_10_holder_rate")) if "top_10_holder_rate" in data else None,
+            _optional_bool(data.get("renounced_mint")) if "renounced_mint" in data else None,
+            _optional_bool(data.get("renounced_freeze_account")) if "renounced_freeze_account" in data else None,
+            # sell_tax 刻度（0–1 还是百分数）未编码，原样保存字符串。
+            _text(data.get("sell_tax")) if "sell_tax" in data else None,
+            chain, address,
+        ),
+    )
+    return changed
+
+
 def job_security(chain):
     started = time.time()
     if _skip_if_cooling("gmgn_security", chain, started):
@@ -571,21 +710,8 @@ def job_security(chain):
         state = "rate_limited" if _rate_limited(e) else "failed"
         _finish("gmgn_security", chain, False, started, error=str(e), run_state=state, request_ok=0)
         return
-    blob = json.dumps(data, sort_keys=True, default=str)
-    digest = hashlib.sha256(blob.encode()).hexdigest()[:16]
-    note = digest
-
     def apply(con):
-        old = con.execute(
-            "SELECT security_note FROM token_snapshot WHERE chain=? AND address=?",
-            (chain, address),
-        ).fetchone()
-        changed = 0 if old and old["security_note"] == note else 1
-        con.execute(
-            "UPDATE token_snapshot SET security_note=? WHERE chain=? AND address=?",
-            (note, chain, address),
-        )
-        return changed
+        return write_security_snapshot(con, chain, address, data, int(time.time()))
 
     try:
         changed = with_db(apply)
@@ -990,7 +1116,9 @@ def _due_key(nxt, now, order):
 
 def run_loop():
     import market_sched as sched
+    import market_research as R
     with_db(H.ensure_catalog)
+    with_db(lambda con: R.refresh_daily_metrics_for_utc_day(con, time.time()))
     nxt = {(s, c): 0 for (s, c) in H.PERIOD}
     stop = {"v": False}
 
@@ -1018,7 +1146,10 @@ def run_loop():
         while True:
             now = time.time()
             if now - last_hb >= 5:
-                with_db(lambda con: H.touch_heartbeat(con, now))
+                def heartbeat(con):
+                    H.touch_heartbeat(con, now)
+                    R.refresh_daily_metrics_for_utc_day(con, now)
+                with_db(heartbeat)
                 last_hb = now
             if now - last_prune >= 600:
                 with_db(lambda con: H.prune_latency(con, now))
@@ -1049,8 +1180,13 @@ def run_loop():
 def run_pass():
     """单轮：每条车道各跑一次。给 `market_run.py once` 用。冷却期内不发 GMGN。"""
     import market_sched as sched
+    import market_research as R
     with_db(H.ensure_catalog)
-    with_db(lambda con: H.touch_heartbeat(con, time.time()))
+    def prepare(con):
+        now = time.time()
+        H.touch_heartbeat(con, now)
+        R.refresh_daily_metrics_for_utc_day(con, now)
+    with_db(prepare)
     for source, chain in list(H.PERIOD):
         if source in GMGN_JOBS and sched.in_cooldown(time.time()):
             _finish(

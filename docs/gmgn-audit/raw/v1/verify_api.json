@@ -1,0 +1,142 @@
+{
+ "called_at": 1790999346,
+ "api_vs_db": {
+  "swaps24h": "1134/1134",
+  "buys24h": "1134/1134",
+  "sells24h": "1134/1134",
+  "activitySource": "1134/1134",
+  "activityUpdatedAt": "1134/1134",
+  "pc1h": "1134/1134",
+  "pc1hUpdatedAt": "1134/1134",
+  "isWashTrading": "1134/1134",
+  "volume24hSource": "1134/1134",
+  "securityIsHoneypot": "1134/1134",
+  "securityRenouncedMint": "1134/1134",
+  "securityRenouncedFreezeAccount": "1134/1134",
+  "securitySellTax": "1134/1134",
+  "trendingRank": "1134/1134",
+  "trendingRankAt": "1134/1134",
+  "hotRank": "1134/1134",
+  "hotRankAt": "1134/1134",
+  "lastSignalType": "1134/1134",
+  "lastSignalTriggerAt": "1134/1134",
+  "lastSignalTriggerMc": "1134/1134"
+ },
+ "api_nonnull_by_chain": {
+  "swaps24h": {
+   "eth": 184,
+   "sol": 323,
+   "base": 278,
+   "robinhood": 280
+  },
+  "buys24h": {
+   "eth": 184,
+   "sol": 323,
+   "base": 278,
+   "robinhood": 280
+  },
+  "sells24h": {
+   "eth": 184,
+   "sol": 323,
+   "base": 278,
+   "robinhood": 280
+  },
+  "activitySource": {
+   "eth": 184,
+   "sol": 323,
+   "base": 278,
+   "robinhood": 280
+  },
+  "activityUpdatedAt": {
+   "eth": 184,
+   "sol": 323,
+   "base": 278,
+   "robinhood": 280
+  },
+  "pc1h": {
+   "eth": 100,
+   "sol": 146,
+   "base": 100,
+   "robinhood": 100
+  },
+  "pc1hUpdatedAt": {
+   "eth": 100,
+   "sol": 146,
+   "base": 100,
+   "robinhood": 100
+  },
+  "isWashTrading": {
+   "eth": 184,
+   "sol": 323,
+   "base": 278,
+   "robinhood": 280
+  },
+  "volume24hSource": {
+   "eth": 184,
+   "sol": 323,
+   "base": 278,
+   "robinhood": 280
+  },
+  "trendingRank": {
+   "eth": 100,
+   "sol": 126,
+   "base": 100,
+   "robinhood": 104
+  },
+  "trendingRankAt": {
+   "eth": 100,
+   "sol": 126,
+   "base": 100,
+   "robinhood": 104
+  },
+  "hotRank": {
+   "sol": 116,
+   "robinhood": 91,
+   "base": 44,
+   "eth": 51
+  },
+  "hotRankAt": {
+   "sol": 116,
+   "robinhood": 91,
+   "base": 44,
+   "eth": 51
+  },
+  "lastSignalType": {
+   "sol": 103,
+   "robinhood": 66
+  },
+  "lastSignalTriggerAt": {
+   "robinhood": 32,
+   "sol": 49
+  },
+  "lastSignalTriggerMc": {
+   "robinhood": 32,
+   "sol": 49
+  },
+  "securityIsHoneypot": {
+   "robinhood": 1,
+   "eth": 1,
+   "base": 1
+  },
+  "securityRenouncedMint": {
+   "robinhood": 1,
+   "eth": 1,
+   "base": 1,
+   "sol": 1
+  },
+  "securityRenouncedFreezeAccount": {
+   "robinhood": 1,
+   "eth": 1,
+   "base": 1,
+   "sol": 1
+  },
+  "securitySellTax": {
+   "robinhood": 1,
+   "eth": 1,
+   "base": 1,
+   "sol": 1
+  }
+ },
+ "returned": 1134,
+ "keys": 1134
+}

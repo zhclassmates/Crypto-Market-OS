@@ -46,6 +46,120 @@
   animation: cell-flash 800ms ease-out;
 }
 
+.market-table > thead > tr > th,
+.market-table > tbody > tr > td {
+  padding: 0.375rem 0.5rem;
+}
+
+.market-table {
+  min-width: max-content;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* 固定列：★ | Token | Price | Age | FDV/MC。日期列在其右侧单独横向滚动。 */
+.market-star-sticky,
+.market-token-sticky,
+.market-price-col,
+.market-age-col,
+.market-fdv-col {
+  position: sticky;
+  background: var(--color-bg);
+}
+
+.market-star-sticky {
+  left: 0;
+  z-index: 12;
+  width: 2.5rem;
+  min-width: 2.5rem;
+  max-width: 2.5rem;
+}
+
+.market-token-sticky {
+  left: 2.5rem;
+  z-index: 11;
+  width: 12.5rem;
+  min-width: 12.5rem;
+  max-width: 12.5rem;
+}
+
+.market-price-col {
+  left: 15rem;
+  z-index: 11;
+  width: 6.25rem;
+  min-width: 6.25rem;
+  max-width: 6.25rem;
+}
+
+.market-age-col {
+  left: 21.25rem;
+  z-index: 11;
+  width: 3.5rem;
+  min-width: 3.5rem;
+  max-width: 3.5rem;
+}
+
+.market-fdv-col {
+  left: 24.75rem;
+  z-index: 11;
+  width: 4.5rem;
+  min-width: 4.5rem;
+  max-width: 4.5rem;
+  border-right: 1px solid var(--color-line);
+}
+
+/* 窄屏放不下五列固定：只固定 ★ + Token，其余跟日期一起滚，保证日期区还看得见。 */
+@media (max-width: 767px) {
+  .market-price-col,
+  .market-age-col,
+  .market-fdv-col {
+    position: static;
+  }
+  .market-fdv-col {
+    border-right: 0;
+  }
+  .market-token-sticky {
+    border-right: 1px solid var(--color-line);
+  }
+}
+
+.market-table > thead .market-star-sticky,
+.market-table > thead .market-token-sticky,
+.market-table > thead .market-price-col,
+.market-table > thead .market-age-col,
+.market-table > thead .market-fdv-col {
+  z-index: 22;
+  background: var(--color-surface-2);
+}
+
+.market-table > tbody > tr:hover > .market-star-sticky,
+.market-table > tbody > tr:hover > .market-token-sticky,
+.market-table > tbody > tr:hover > .market-price-col,
+.market-table > tbody > tr:hover > .market-age-col,
+.market-table > tbody > tr:hover > .market-fdv-col {
+  background: color-mix(in srgb, var(--color-surface) 88%, var(--color-bg));
+}
+
+/* 默认视口 = 固定列 29.25rem + 7 个日期列（7 × 4.25rem）。更早的日期向左滚出。 */
+.market-table-scroll {
+  max-width: calc(29.25rem + 7 * 4.25rem + 2px);
+}
+
+.market-date-col {
+  width: 4.25rem;
+  min-width: 4.25rem;
+  max-width: 4.25rem;
+}
+
+.market-table [data-daily-date] {
+  padding-inline: 0.25rem;
+}
+
+.market-table [data-today="true"] {
+  background: color-mix(in srgb, var(--color-brass) 8%, transparent);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--color-brass) 65%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

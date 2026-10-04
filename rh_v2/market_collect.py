@@ -20,10 +20,11 @@ import sys
 import time
 
 import market_db as db
+from market_chains import MARKET_CHAINS
 
 
 GMGN_CLI = os.environ.get("GMGN_CLI", "gmgn-cli")
-CHAINS = os.environ.get("MARKET_CHAINS", "sol,robinhood,base,eth").split(",")
+CHAINS = MARKET_CHAINS
 TOP_N = int(os.environ.get("MARKET_TOP_N", "100"))
 BACKFILL_DAYS = int(os.environ.get("MARKET_BACKFILL_DAYS", "14"))
 

@@ -5,7 +5,6 @@ import {
   CHAINS,
   SOURCE_LABEL,
   fmtAge,
-  worseStatus,
   type HealthSource,
   type MarketStatus,
 } from "@/lib/rh/market-status";
@@ -102,12 +101,9 @@ export function MarketHealthBar() {
           <tbody>
             {CHAINS.map((chain) => {
               const group = (sources ?? []).filter((s) => s.chain === chain);
+              // 链总状态只看主 GMGN。其余源只在芯片里显示，不参与汇总。
               const gmgn = group.find((s) => s.source === "gmgn");
-              const status = group.reduce<MarketStatus>(
-                (acc, s) => worseStatus(acc, s.status),
-                "LIVE",
-              );
-              const headline = group.find((s) => s.status === status) ?? gmgn;
+              const status = gmgn?.status ?? null;
               const drift = Math.max(0, Math.floor((now - seenAt) / 1000));
               const liveAge = (sec: number | null) => (sec == null ? null : sec + drift);
               const apiAge = liveAge(gmgn?.apiAgeSec ?? null);
@@ -131,8 +127,8 @@ export function MarketHealthBar() {
                   </td>
                   <td className="px-3 py-2">
                     <span className="inline-flex items-center gap-1 font-mono">
-                      <span className={`size-2 rounded-full ${DOT[group.length ? status : "STALE"]}`} />
-                      {group.length ? status : "—"}
+                      <span className={`size-2 rounded-full ${DOT[status ?? "STALE"]}`} />
+                      {status ?? "—"}
                     </span>
                   </td>
                   <td className="px-3 py-2 font-mono">{fmtAge(apiAge == null ? null : Math.max(0, apiAge))}</td>
@@ -141,8 +137,8 @@ export function MarketHealthBar() {
                     {gmgn ? `${gmgn.hotChanged}/${gmgn.rowsReceived}` : "—"}
                   </td>
                   <td className="px-3 py-2 font-mono">{gmgn?.latencyMs != null ? `${gmgn.latencyMs}ms` : "—"}</td>
-                  <td className="max-w-40 truncate px-3 py-2 font-mono text-clay" title={headline?.lastError || ""}>
-                    {headline?.lastError || "—"}
+                  <td className="max-w-40 truncate px-3 py-2 font-mono text-clay" title={gmgn?.lastError || ""}>
+                    {gmgn?.lastError || "—"}
                   </td>
                   <td className="px-3 py-2 font-mono" title="collector_heartbeat">{clock(gmgn?.collectorHeartbeat ?? null)}</td>
                   <td className="px-3 py-2 font-mono" title="last_success">{clock(gmgn?.lastSuccess ?? null)}</td>
@@ -156,7 +152,7 @@ export function MarketHealthBar() {
         </table>
       </div>
       <p className="px-3 py-2 text-[11px] text-muted">
-        主行时钟是 GMGN。芯片是该链每个源自己的 API age。心跳活着、API 成功时间停住，就是旧数据。
+        主行状态和时钟都只看 GMGN。芯片是该链每个源自己的 API age。心跳活着、API 成功时间停住，就是旧数据。
       </p>
     </section>
   );

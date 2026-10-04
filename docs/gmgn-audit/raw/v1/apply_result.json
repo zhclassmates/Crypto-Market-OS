@@ -1,0 +1,118 @@
+{
+ "raw_rows": 100,
+ "written": 100,
+ "fetched_at": 1790995934,
+ "swaps_eq_buys_plus_sells": 100,
+ "raw_key_presence": {
+  "buys": 100,
+  "sells": 100,
+  "swaps": 100,
+  "price_change_percent1h": 100,
+  "is_wash_trading": 100,
+  "rank": 100
+ },
+ "raw_types": {
+  "buys": [
+   "int"
+  ],
+  "sells": [
+   "int"
+  ],
+  "swaps": [
+   "int"
+  ],
+  "price_change_percent1h": [
+   "float"
+  ],
+  "is_wash_trading": [
+   "bool"
+  ]
+ },
+ "wash_true": 0,
+ "checks": {
+  "swaps": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "buys_24h": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "sells_24h": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "pc_1h": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "is_wash_trading": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 100
+  },
+  "rank": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "price": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "liquidity": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "market_cap": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "holders": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "volume_24h": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  },
+  "event_meta": {
+   "match": 100,
+   "mismatch": [],
+   "n_mismatch": 0,
+   "raw_null": 0,
+   "raw_zero": 0
+  }
+ }
+}

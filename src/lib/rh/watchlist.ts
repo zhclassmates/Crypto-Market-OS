@@ -1,6 +1,8 @@
-/** 自选只存在这台浏览器。身份是 chain + address，和榜单同一套。 */
+/** 自选只存在这台浏览器。身份是 chain + address（address 小写比较），不能只看 address：跨链会撞。 */
 
-export const WATCH_STORAGE_KEY = "rh.watchlist.v1";
+export const WATCH_STORAGE_KEY = "market_watchlist_v1";
+/** 旧版键；新键还没写过时读一次迁过来。 */
+export const LEGACY_WATCH_STORAGE_KEY = "rh.watchlist.v1";
 export const WATCH_EVENT = "rh-watchlist";
 
 export interface WatchItem {
@@ -12,7 +14,7 @@ export interface WatchItem {
 }
 
 export function watchKey(chain: string, address: string): string {
-  return `${chain}:${address}`;
+  return `${chain}:${address.toLowerCase()}`;
 }
 
 export function parseWatchlist(raw: string | null): WatchItem[] {
@@ -70,7 +72,8 @@ export function toggleWatchItem(
 
 export function loadWatchlist(storage: { getItem(key: string): string | null } | null): WatchItem[] {
   if (!storage) return [];
-  return parseWatchlist(storage.getItem(WATCH_STORAGE_KEY));
+  const raw = storage.getItem(WATCH_STORAGE_KEY);
+  return parseWatchlist(raw ?? storage.getItem(LEGACY_WATCH_STORAGE_KEY));
 }
 
 export function writeWatchlist(storage: { setItem(key: string, value: string): void }, items: WatchItem[]): void {

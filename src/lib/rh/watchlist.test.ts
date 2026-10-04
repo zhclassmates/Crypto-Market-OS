@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseWatchlist, toggleWatchItem, watchKey } from "./watchlist.ts";
+import { LEGACY_WATCH_STORAGE_KEY, WATCH_STORAGE_KEY, loadWatchlist, parseWatchlist, toggleWatchItem, watchKey, writeWatchlist } from "./watchlist.ts";
 
 describe("watchlist", () => {
   it("keeps chain and address apart when symbols match", () => {
     const now = 1_700_000_000;
     let items = toggleWatchItem([], { chain: "sol", address: "mintA", symbol: "SI", name: "one" }, now);
     items = toggleWatchItem(items, { chain: "eth", address: "0xabc", symbol: "SI", name: "two" }, now + 1);
-    assert.deepEqual(items.map((w) => watchKey(w.chain, w.address)), ["sol:mintA", "eth:0xabc"]);
+    assert.deepEqual(items.map((w) => watchKey(w.chain, w.address)), ["sol:minta", "eth:0xabc"]);
     assert.equal(items[1].addedAt, now + 1);
   });
 
@@ -38,5 +38,23 @@ describe("watchlist", () => {
     assert.deepEqual(parseWatchlist(null), []);
     assert.deepEqual(parseWatchlist("{"), []);
     assert.deepEqual(parseWatchlist("{\"chain\":\"sol\"}"), []);
+  });
+
+  it("keeps the same address on two chains as two separate entries", () => {
+    let items = toggleWatchItem([], { chain: "eth", address: "0xAbC", symbol: "X", name: null }, 1);
+    items = toggleWatchItem(items, { chain: "base", address: "0xabc", symbol: "X", name: null }, 2);
+    assert.equal(items.length, 2);
+    items = toggleWatchItem(items, { chain: "eth", address: "0xabc", symbol: "X", name: null }, 3);
+    assert.deepEqual(items.map((w) => w.chain), ["base"]);
+  });
+
+  it("persists under market_watchlist_v1 and migrates the legacy key once", () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    store.set(LEGACY_WATCH_STORAGE_KEY, JSON.stringify([{ chain: "sol", address: "old", addedAt: 1 }]));
+    assert.equal(WATCH_STORAGE_KEY, "market_watchlist_v1");
+    assert.deepEqual(loadWatchlist(storage).map((w) => w.address), ["old"]);
+    writeWatchlist(storage, []);
+    assert.deepEqual(loadWatchlist(storage), []);
   });
 });

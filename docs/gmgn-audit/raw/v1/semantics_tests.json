@@ -1,0 +1,1158 @@
+{
+ "price_change_percent1h_vs_hourly_lag1h": {
+  "n": 391,
+  "median_abs_log_err_if_percent": 0.0091,
+  "median_abs_log_err_if_ratio": 0.5079,
+  "share_within_15pct_if_percent": 0.913,
+  "share_within_15pct_if_ratio": 0.254
+ },
+ "price_change_percent_vs_hourly_lag24h": {
+  "n": 262,
+  "median_abs_log_err_if_percent": 0.0061,
+  "median_abs_log_err_if_ratio": 1.188,
+  "share_within_15pct_if_percent": 0.935,
+  "share_within_15pct_if_ratio": 0.119
+ },
+ "price_change_percent_vs_hourly_lag1h": {
+  "n": 390,
+  "median_abs_log_err_if_percent": 0.0984,
+  "median_abs_log_err_if_ratio": 2.6183,
+  "share_within_15pct_if_percent": 0.556,
+  "share_within_15pct_if_ratio": 0.065
+ },
+ "trending.volume_over_dexscreener_volume_ds": {
+  "n": 400,
+  "median_ratio": 1.1019,
+  "share_ratio_0.5_to_2": 0.752
+ },
+ "trending.liquidity_over_dexscreener_liquidity_ds": {
+  "n": 396,
+  "median_ratio": 0.9999,
+  "share_ratio_0.5_to_2": 0.806
+ },
+ "trending.price_over_dexscreener_price_ds": {
+  "n": 400,
+  "median_ratio": 1.0,
+  "share_ratio_0.5_to_2": 0.988
+ },
+ "trending.market_cap_over_price_x_total_supply": {
+  "n": 400,
+  "median": 1.0,
+  "share_0.99_1.01": 0.993
+ },
+ "hot.market_cap_over_price_x_total_supply": {
+  "n": 98,
+  "median": 1.0,
+  "share_0.99_1.01": 1.0
+ },
+ "kline.amount_div_volume_over_close": {
+  "n": 5000,
+  "median": 1717.9441,
+  "p10": 0.0001,
+  "p90": 2321113572.2106
+ },
+ "kline.volume_div_amount_over_close": {
+  "n": 5000,
+  "median": 1.0015
+ },
+ "trending.volume_over_kline_last_final_day": {
+  "vs_kline_volume": {
+   "n": 339,
+   "median": 0.9921
+  },
+  "vs_kline_amount": {
+   "n": 333,
+   "median": 0.0145
+  }
+ },
+ "trending.sol.rank": {
+  "min": 1,
+  "max": 100,
+  "n": 100,
+  "unique": 100,
+  "contiguous_1_to_n": true,
+  "spearman_rank_vs_volume": -0.709,
+  "spearman_rank_vs_swaps": -0.85,
+  "spearman_rank_vs_hot_level": 0.794,
+  "spearman_rank_vs_visiting_count": -0.499,
+  "spearman_rank_vs_market_cap": -0.208,
+  "spearman_rank_vs_holder_count": -0.334,
+  "spearman_rank_vs_price_change_percent": -0.3,
+  "spearman_rank_vs_smart_degen_count": -0.211,
+  "order_in_payload_equals_rank": true
+ },
+ "trending.robinhood.rank": {
+  "min": 1,
+  "max": 100,
+  "n": 100,
+  "unique": 100,
+  "contiguous_1_to_n": true,
+  "spearman_rank_vs_volume": -0.519,
+  "spearman_rank_vs_swaps": -0.622,
+  "spearman_rank_vs_hot_level": 0.488,
+  "spearman_rank_vs_visiting_count": -0.39,
+  "spearman_rank_vs_market_cap": -0.429,
+  "spearman_rank_vs_holder_count": -0.264,
+  "spearman_rank_vs_price_change_percent": 0.172,
+  "spearman_rank_vs_smart_degen_count": -0.312,
+  "order_in_payload_equals_rank": true
+ },
+ "trending.base.rank": {
+  "min": 1,
+  "max": 100,
+  "n": 100,
+  "unique": 100,
+  "contiguous_1_to_n": true,
+  "spearman_rank_vs_volume": -0.709,
+  "spearman_rank_vs_swaps": -0.713,
+  "spearman_rank_vs_hot_level": 0.596,
+  "spearman_rank_vs_visiting_count": 0.094,
+  "spearman_rank_vs_market_cap": -0.179,
+  "spearman_rank_vs_holder_count": 0.014,
+  "spearman_rank_vs_price_change_percent": -0.053,
+  "spearman_rank_vs_smart_degen_count": 0.111,
+  "order_in_payload_equals_rank": true
+ },
+ "trending.eth.rank": {
+  "min": 1,
+  "max": 100,
+  "n": 100,
+  "unique": 100,
+  "contiguous_1_to_n": true,
+  "spearman_rank_vs_volume": -0.394,
+  "spearman_rank_vs_swaps": -0.583,
+  "spearman_rank_vs_hot_level": 1.0,
+  "spearman_rank_vs_visiting_count": -0.074,
+  "spearman_rank_vs_market_cap": 0.113,
+  "spearman_rank_vs_holder_count": 0.183,
+  "spearman_rank_vs_price_change_percent": 0.165,
+  "spearman_rank_vs_smart_degen_count": -0.468,
+  "order_in_payload_equals_rank": true
+ },
+ "hot.sol.rank": {
+  "min": 1,
+  "max": 98,
+  "n": 98,
+  "unique": 98,
+  "contiguous_1_to_n": true,
+  "spearman_rank_vs_volume": -0.841,
+  "spearman_rank_vs_swaps": -0.924,
+  "spearman_rank_vs_hot_level": 0.796,
+  "spearman_rank_vs_visiting_count": -0.677,
+  "spearman_rank_vs_market_cap": -0.143,
+  "spearman_rank_vs_holder_count": -0.233,
+  "spearman_rank_vs_price_change_percent": -0.33,
+  "spearman_rank_vs_smart_degen_count": -0.056,
+  "order_in_payload_equals_rank": true
+ },
+ "trenches.complete_cost_time_minus_(complete-created)": {
+  "n": 151,
+  "share_exact_0": 1.0,
+  "median": 0
+ },
+ "trenches.usd_market_cap_presence": {
+  "rows_with_both": 0,
+  "median_usd_over_mc": null
+ },
+ "trenches.progress_range": {
+  "n": 665,
+  "min": 0.0,
+  "max": 1.0
+ },
+ "signal.relations": {
+  "n": 100,
+  "trigger_mc_eq_data.market_cap": 100,
+  "trigger_mc_eq_first_trigger_mc": 73,
+  "ath_ge_market_cap": 94,
+  "ath_ge_trigger_mc": 96,
+  "signal_times_eq_sum_by_type": 100,
+  "trigger_at_eq_data.created_timestamp": 16,
+  "cur_holder_ne_data_holder": 76,
+  "data.usd_market_cap_eq_data.market_cap": 100,
+  "signal_type_values": [
+   1,
+   3,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   18,
+   21
+  ],
+  "trigger_mc_eq_market_cap": 18,
+  "sorted_by_trigger_at_desc_sol": true,
+  "sorted_by_trigger_at_desc_robinhood": true
+ },
+ "trending.value_ranges": {
+  "top_10_holder_rate": {
+   "distinct_sample": [
+    "0",
+    "0.0605",
+    "0.0717",
+    "0.0723",
+    "0.0744",
+    "0.0745",
+    "0.0746",
+    "0.077"
+   ],
+   "min": 0.0,
+   "max": 2.0965,
+   "by_chain_distinct": {
+    "sol": [
+     "0.0717",
+     "0.0723",
+     "0.0745",
+     "0.077",
+     "0.0834",
+     "0.0916"
+    ],
+    "robinhood": [
+     "0.0744",
+     "0.1177",
+     "0.1212",
+     "0.1294",
+     "0.1356",
+     "0.1377"
+    ],
+    "base": [
+     "0",
+     "0.1007",
+     "0.1075",
+     "0.1092",
+     "0.1226",
+     "0.1334"
+    ],
+    "eth": [
+     "0.0605",
+     "0.0746",
+     "0.0802",
+     "0.1063",
+     "0.1095",
+     "0.1221"
+    ]
+   }
+  },
+  "rug_ratio": {
+   "distinct_sample": [
+    "0",
+    "0.0037174721189591076",
+    "0.012987012987012988",
+    "0.013157894736842105",
+    "0.0136986301369863",
+    "0.02",
+    "0.04",
+    "0.04602510460251046"
+   ],
+   "min": 0.0,
+   "max": 1.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "0.02",
+     "0.04",
+     "0.04602510460251046",
+     "0.06",
+     "0.08074534161490683"
+    ],
+    "robinhood": [
+     "0"
+    ],
+    "base": [
+     "0",
+     "0.0037174721189591076",
+     "0.012987012987012988",
+     "0.013157894736842105",
+     "0.0136986301369863",
+     "0.07142857142857142"
+    ],
+    "eth": [
+     "0"
+    ]
+   }
+  },
+  "bundler_rate": {
+   "distinct_sample": [
+    "0",
+    "0.0002",
+    "0.0004",
+    "0.0006",
+    "0.001",
+    "0.0013",
+    "0.0014",
+    "0.0015"
+   ],
+   "min": 0.0,
+   "max": 0.6501,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "0.0004",
+     "0.0006",
+     "0.0014",
+     "0.0024",
+     "0.0037"
+    ],
+    "robinhood": [
+     "0",
+     "0.0002",
+     "0.001",
+     "0.0013",
+     "0.0015",
+     "0.0019"
+    ],
+    "base": [
+     "0"
+    ],
+    "eth": [
+     "0"
+    ]
+   }
+  },
+  "rat_trader_amount_rate": {
+   "distinct_sample": [
+    "0",
+    "0.0001",
+    "0.0002",
+    "0.0003",
+    "0.0004",
+    "0.0005",
+    "0.0006",
+    "0.0011"
+   ],
+   "min": 0.0,
+   "max": 0.9302,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "0.0001",
+     "0.0002",
+     "0.0003",
+     "0.0005",
+     "0.0006"
+    ],
+    "robinhood": [
+     "0",
+     "0.0002",
+     "0.0004",
+     "0.0011",
+     "0.0013",
+     "0.0031"
+    ],
+    "base": [
+     "0"
+    ],
+    "eth": [
+     "0"
+    ]
+   }
+  },
+  "dev_team_hold_rate": {
+   "distinct_sample": [
+    "0",
+    "0.0001369877",
+    "0.0001775926",
+    "0.0001924709",
+    "0.0002353773",
+    "0.0002844965",
+    "0.0003792748",
+    "0.0005598651"
+   ],
+   "min": 0.0,
+   "max": 0.8517159839,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "0.0001369877",
+     "0.0001775926",
+     "0.0002844965",
+     "0.0005598651",
+     "0.0006444521"
+    ],
+    "robinhood": [
+     "0",
+     "0.0001924709",
+     "0.0002353773",
+     "0.0013540888",
+     "0.0018883415",
+     "0.0021294984"
+    ],
+    "base": [
+     "0",
+     "0.0013017314",
+     "0.0015003318",
+     "0.0041434419",
+     "0.0083175013",
+     "2.597e-07"
+    ],
+    "eth": [
+     "0",
+     "0.0003792748",
+     "0.0011983533",
+     "0.0067212377",
+     "0.0088541234",
+     "0.0114003852"
+    ]
+   }
+  },
+  "bot_degen_rate": {
+   "distinct_sample": [
+    "0",
+    "0.0001",
+    "0.0003",
+    "0.0021",
+    "0.0038",
+    "0.0118",
+    "0.0119",
+    "0.0185"
+   ],
+   "min": 0.0,
+   "max": 0.8869,
+   "by_chain_distinct": {
+    "sol": [
+     "0.0252",
+     "0.0385",
+     "0.0417",
+     "0.0502",
+     "0.0548",
+     "0.0813"
+    ],
+    "robinhood": [
+     "0.0001",
+     "0.0003",
+     "0.0021",
+     "0.0038",
+     "0.0118",
+     "0.0119"
+    ],
+    "base": [
+     "0"
+    ],
+    "eth": [
+     "0"
+    ]
+   }
+  },
+  "entrapment_ratio": {
+   "distinct_sample": [
+    "0",
+    "0.0002",
+    "0.0003",
+    "0.002",
+    "0.0021",
+    "0.0024",
+    "0.006",
+    "0.0077"
+   ],
+   "min": 0.0,
+   "max": 2.2102,
+   "by_chain_distinct": {
+    "sol": [
+     "0.0003",
+     "0.002",
+     "0.0021",
+     "0.0024",
+     "0.006",
+     "0.0077"
+    ],
+    "robinhood": [
+     "0",
+     "0.027",
+     "0.0521",
+     "0.0533",
+     "0.054",
+     "0.0818"
+    ],
+    "base": [
+     "0",
+     "0.0002",
+     "0.015",
+     "0.0408",
+     "0.0552",
+     "0.1211"
+    ],
+    "eth": [
+     "0.0702",
+     "0.1032",
+     "0.1094",
+     "0.1425",
+     "0.1467",
+     "0.1536"
+    ]
+   }
+  },
+  "top70_sniper_hold_rate": {
+   "distinct_sample": [
+    "0",
+    "0.0001079972",
+    "0.0001369877",
+    "0.0001665641",
+    "0.0001776297",
+    "0.0001924709",
+    "0.0002353773",
+    "0.0002368961"
+   ],
+   "min": 0.0,
+   "max": 0.8518394224,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "0.0001369877",
+     "0.0001776297",
+     "0.0002844965",
+     "0.000432827",
+     "0.0005598651"
+    ],
+    "robinhood": [
+     "0",
+     "0.0001665641",
+     "0.0001924709",
+     "0.0002353773",
+     "0.0002368961",
+     "0.00025945"
+    ],
+    "base": [
+     "0",
+     "0.0001079972",
+     "0.0003362936",
+     "0.0003915521",
+     "0.0016409888",
+     "0.0041446241"
+    ],
+    "eth": [
+     "0",
+     "0.0003792748",
+     "0.0006",
+     "0.0011983533",
+     "0.00333",
+     "0.0067212377"
+    ]
+   }
+  },
+  "bluechip_owner_percentage": {
+   "distinct_sample": [
+    "0",
+    "0.00688886",
+    "0.00714255",
+    "0.00943316",
+    "0.0137278",
+    "0.0162485",
+    "0.0245561",
+    "0.0338261"
+   ],
+   "min": 0.0,
+   "max": 1.42638,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "0.00688886",
+     "0.00714255",
+     "0.00943316",
+     "0.0137278",
+     "0.0162485"
+    ],
+    "robinhood": [
+     "0"
+    ],
+    "base": [
+     "0"
+    ],
+    "eth": [
+     "0"
+    ]
+   }
+  },
+  "buy_tax": {
+   "distinct_sample": [
+    "\"\"",
+    "\"0\"",
+    "\"0.01\"",
+    "\"0.03\"",
+    "\"0.05\""
+   ],
+   "min": 0.0,
+   "max": 0.05,
+   "by_chain_distinct": {
+    "sol": [
+     "\"\"",
+     "\"0.01\"",
+     "\"0.03\""
+    ],
+    "robinhood": [
+     "\"0\"",
+     "\"0.03\"",
+     "\"0.05\""
+    ],
+    "base": [
+     "\"0\"",
+     "\"0.01\"",
+     "\"0.03\""
+    ],
+    "eth": [
+     "\"0\"",
+     "\"0.03\""
+    ]
+   }
+  },
+  "sell_tax": {
+   "distinct_sample": [
+    "\"\"",
+    "\"0\"",
+    "\"0.0099\"",
+    "\"0.01\"",
+    "\"0.0299\"",
+    "\"0.03\"",
+    "\"0.05\""
+   ],
+   "min": 0.0,
+   "max": 0.05,
+   "by_chain_distinct": {
+    "sol": [
+     "\"\"",
+     "\"0.01\"",
+     "\"0.03\""
+    ],
+    "robinhood": [
+     "\"0\"",
+     "\"0.03\"",
+     "\"0.05\""
+    ],
+    "base": [
+     "\"0\"",
+     "\"0.0099\"",
+     "\"0.03\""
+    ],
+    "eth": [
+     "\"0\"",
+     "\"0.0299\""
+    ]
+   }
+  },
+  "burn_ratio": {
+   "distinct_sample": [
+    "0",
+    "0.0002",
+    "0.0003796437869234362",
+    "0.0004",
+    "0.0015",
+    "0.0027",
+    "0.004975124378109453",
+    "0.0058"
+   ],
+   "min": 0.0,
+   "max": 0.2055,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "0.0003796437869234362",
+     "0.004975124378109453",
+     "0.010629690844287581",
+     "0.012616719589652355",
+     "0.013915957091859549"
+    ],
+    "robinhood": [
+     "0",
+     "0.0002",
+     "0.0015",
+     "0.0058",
+     "0.0063",
+     "0.0087"
+    ],
+    "base": [
+     "0",
+     "0.0274",
+     "0.2055"
+    ],
+    "eth": [
+     "0",
+     "0.0004",
+     "0.0027",
+     "0.0117",
+     "0.0154",
+     "0.058"
+    ]
+   }
+  },
+  "lock_percent": {
+   "distinct_sample": [
+    "0",
+    "0.6818038765201486",
+    "0.95",
+    "0.9584662709236805",
+    "0.9953073164177088",
+    "0.999104998882554",
+    "0.9992754264239426",
+    "0.9999829141735496"
+   ],
+   "min": 0.0,
+   "max": 1.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0"
+    ],
+    "robinhood": [
+     "0",
+     "0.95",
+     "0.9992754264239426",
+     "1",
+     "3.562946990674454e-09"
+    ],
+    "base": [
+     "0",
+     "0.6818038765201486",
+     "0.95",
+     "1",
+     "1.272497729638182e-06",
+     "3.531788249812115e-22"
+    ],
+    "eth": [
+     "0",
+     "0.95",
+     "0.9584662709236805",
+     "0.9953073164177088",
+     "0.999104998882554",
+     "0.9999829141735496"
+    ]
+   }
+  },
+  "hot_level": {
+   "distinct_sample": [
+    "0",
+    "1",
+    "2",
+    "3"
+   ],
+   "min": 0.0,
+   "max": 3.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "1",
+     "2",
+     "3"
+    ],
+    "robinhood": [
+     "0",
+     "1",
+     "2",
+     "3"
+    ],
+    "base": [
+     "0",
+     "1",
+     "2",
+     "3"
+    ],
+    "eth": [
+     "0"
+    ]
+   }
+  },
+  "is_honeypot": {
+   "distinct_sample": [
+    "0"
+   ],
+   "min": 0.0,
+   "max": 0.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0"
+    ],
+    "robinhood": [
+     "0"
+    ],
+    "base": [
+     "0"
+    ],
+    "eth": [
+     "0"
+    ]
+   }
+  },
+  "is_open_source": {
+   "distinct_sample": [
+    "0",
+    "1"
+   ],
+   "min": 0.0,
+   "max": 1.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0"
+    ],
+    "robinhood": [
+     "1"
+    ],
+    "base": [
+     "1"
+    ],
+    "eth": [
+     "1"
+    ]
+   }
+  },
+  "is_renounced": {
+   "distinct_sample": [
+    "0",
+    "1"
+   ],
+   "min": 0.0,
+   "max": 1.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0"
+    ],
+    "robinhood": [
+     "0",
+     "1"
+    ],
+    "base": [
+     "0",
+     "1"
+    ],
+    "eth": [
+     "0",
+     "1"
+    ]
+   }
+  },
+  "renounced_mint": {
+   "distinct_sample": [
+    "1",
+    "null"
+   ],
+   "min": 1.0,
+   "max": 1.0,
+   "by_chain_distinct": {
+    "sol": [
+     "1"
+    ],
+    "robinhood": [
+     "null"
+    ],
+    "base": [
+     "null"
+    ],
+    "eth": [
+     "null"
+    ]
+   }
+  },
+  "renounced_freeze_account": {
+   "distinct_sample": [
+    "1",
+    "null"
+   ],
+   "min": 1.0,
+   "max": 1.0,
+   "by_chain_distinct": {
+    "sol": [
+     "1"
+    ],
+    "robinhood": [
+     "null"
+    ],
+    "base": [
+     "null"
+    ],
+    "eth": [
+     "null"
+    ]
+   }
+  },
+  "cto_flag": {
+   "distinct_sample": [
+    "0",
+    "1"
+   ],
+   "min": 0.0,
+   "max": 1.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "1"
+    ],
+    "robinhood": [
+     "0",
+     "1"
+    ],
+    "base": [
+     "0",
+     "1"
+    ],
+    "eth": [
+     "0",
+     "1"
+    ]
+   }
+  },
+  "dexscr_ad": {
+   "distinct_sample": [
+    "0",
+    "1"
+   ],
+   "min": 0.0,
+   "max": 1.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "1"
+    ],
+    "robinhood": [
+     "0"
+    ],
+    "base": [
+     "0",
+     "1"
+    ],
+    "eth": [
+     "0",
+     "1"
+    ]
+   }
+  },
+  "dexscr_trending_bar": {
+   "distinct_sample": [
+    "0"
+   ],
+   "min": 0.0,
+   "max": 0.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0"
+    ],
+    "robinhood": [
+     "0"
+    ],
+    "base": [
+     "0"
+    ],
+    "eth": [
+     "0"
+    ]
+   }
+  },
+  "dexscr_update_link": {
+   "distinct_sample": [
+    "0",
+    "1"
+   ],
+   "min": 0.0,
+   "max": 1.0,
+   "by_chain_distinct": {
+    "sol": [
+     "0",
+     "1"
+    ],
+    "robinhood": [
+     "0",
+     "1"
+    ],
+    "base": [
+     "0",
+     "1"
+    ],
+    "eth": [
+     "0",
+     "1"
+    ]
+   }
+  },
+  "creator_close": {
+   "distinct_sample": [
+    "false",
+    "true"
+   ],
+   "min": null,
+   "max": null,
+   "by_chain_distinct": {
+    "sol": [
+     "false",
+     "true"
+    ],
+    "robinhood": [
+     "false",
+     "true"
+    ],
+    "base": [
+     "false",
+     "true"
+    ],
+    "eth": [
+     "false",
+     "true"
+    ]
+   }
+  },
+  "is_wash_trading": {
+   "distinct_sample": [
+    "false"
+   ],
+   "min": null,
+   "max": null,
+   "by_chain_distinct": {
+    "sol": [
+     "false"
+    ],
+    "robinhood": [
+     "false"
+    ],
+    "base": [
+     "false"
+    ],
+    "eth": [
+     "false"
+    ]
+   }
+  }
+ },
+ "cross_endpoint_windows": {
+  "sol": {
+   "dt_min": 47.8,
+   "common": 0,
+   "swaps": null,
+   "buys": null,
+   "sells": null,
+   "volume": null,
+   "holder_count": null,
+   "liquidity": null,
+   "market_cap": null,
+   "price": null
+  },
+  "robinhood": {
+   "dt_min": -7.5,
+   "common": 0,
+   "swaps": null,
+   "buys": null,
+   "sells": null,
+   "volume": null,
+   "holder_count": null,
+   "liquidity": null,
+   "market_cap": null,
+   "price": null
+  },
+  "base": {
+   "dt_min": -7.5,
+   "common": 2,
+   "swaps": {
+    "n": 2,
+    "median": 1.0903,
+    "within_10pct": 0.5
+   },
+   "buys": {
+    "n": 2,
+    "median": 1.068,
+    "within_10pct": 0.5
+   },
+   "sells": {
+    "n": 2,
+    "median": 1.1172,
+    "within_10pct": 0.5
+   },
+   "volume": {
+    "n": 2,
+    "median": 1.1029,
+    "within_10pct": 0.5
+   },
+   "holder_count": {
+    "n": 2,
+    "median": 1.038,
+    "within_10pct": 1.0
+   },
+   "liquidity": {
+    "n": 2,
+    "median": 1.0164,
+    "within_10pct": 1.0
+   },
+   "market_cap": {
+    "n": 2,
+    "median": 1.0219,
+    "within_10pct": 1.0
+   },
+   "price": {
+    "n": 2,
+    "median": 1.0219,
+    "within_10pct": 1.0
+   }
+  },
+  "eth": {
+   "dt_min": -4.8,
+   "common": 3,
+   "swaps": {
+    "n": 3,
+    "median": 1.0,
+    "within_10pct": 1.0
+   },
+   "buys": {
+    "n": 3,
+    "median": 1.0,
+    "within_10pct": 1.0
+   },
+   "sells": {
+    "n": 3,
+    "median": 1.0,
+    "within_10pct": 1.0
+   },
+   "volume": {
+    "n": 3,
+    "median": 1.0,
+    "within_10pct": 1.0
+   },
+   "holder_count": {
+    "n": 3,
+    "median": 1.0,
+    "within_10pct": 1.0
+   },
+   "liquidity": {
+    "n": 3,
+    "median": 2.452,
+    "within_10pct": 0.0
+   },
+   "market_cap": {
+    "n": 3,
+    "median": 1.0,
+    "within_10pct": 1.0
+   },
+   "price": {
+    "n": 3,
+    "median": 1.0,
+    "within_10pct": 1.0
+   }
+  },
+  "hot_vs_trending_sol": {
+   "dt_min": 47.4,
+   "common": 52,
+   "swaps": {
+    "n": 52,
+    "median": 1.0022,
+    "within_10pct": 0.923
+   },
+   "volume": {
+    "n": 52,
+    "median": 1.002,
+    "within_10pct": 0.942
+   },
+   "price_change_percent": {
+    "n": 52,
+    "median": 0.9715,
+    "within_10pct": 0.288
+   },
+   "price_change_percent1h": {
+    "n": 52,
+    "median": -0.0719,
+    "within_10pct": 0.0
+   },
+   "holder_count": {
+    "n": 52,
+    "median": 0.9965,
+    "within_10pct": 1.0
+   }
+  }
+ },
+ "kline.close_over_dexscreener_price_ds_recent": {
+  "n": 250,
+  "median": 1.0036,
+  "within_0.5_2": 0.752
+ }
+}

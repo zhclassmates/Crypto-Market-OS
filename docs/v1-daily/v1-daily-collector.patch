@@ -1,0 +1,1656 @@
+diff --git a/rh_v2/market_collect.py b/rh_v2/market_collect.py
+index 96c84ae..1bf9d23 100644
+--- a/rh_v2/market_collect.py
++++ b/rh_v2/market_collect.py
+@@ -83,29 +83,50 @@ def gmgn(args, timeout=60):
+ NET_ERR_HINTS = ("fetch failed", "socket", "tls", "econnreset", "etimedout", "other side closed", "network")
+ 
+ 
+-def fetch_trending(chain, limit=TOP_N, attempts=3):
+-    """榜单是发现源之一。网络类错误重试；429 和其它 4xx 不重试，限流进入全局冷却。"""
++# Trending 的 volume / swaps / buys / sells 跟随 --interval。24h 字段必须显式请求 24h。
++TRENDING_INTERVAL = "24h"
++
++
++def gmgn_with_net_retry(args, timeout=60, attempts=3):
++    """网络类错误重试；429 和其它 4xx 不重试，限流进入全局冷却（gmgn() 内处理）。"""
+     import market_sched as sched
+-    args = ["market", "trending", "--chain", chain, "--interval", "24h", "--limit", str(limit)]
+     for i in range(attempts):
+         try:
+-            data = gmgn(args)
+-            return (data.get("data") or {}).get("rank", [])
++            return gmgn(args, timeout=timeout)
+         except sched.RateLimited:
+             raise
+         except (RuntimeError, subprocess.TimeoutExpired) as e:
+             msg = str(e).lower()
+             if i == attempts - 1 or not (isinstance(e, subprocess.TimeoutExpired) or any(h in msg for h in NET_ERR_HINTS)):
+                 raise
+-            print(f"  榜单网络错误，{2 * (i + 1)}s 后重试 ({i + 1}/{attempts - 1}): {str(e)[:80]}", flush=True)
++            print(f"  GMGN 网络错误，{2 * (i + 1)}s 后重试 ({i + 1}/{attempts - 1}): {str(e)[:80]}", flush=True)
+             time.sleep(2 * (i + 1))
+ 
+ 
+-def fetch_kline(chain, address, resolution, frm, to):
+-    return gmgn([
++def trending_args(chain, limit=TOP_N):
++    return ["market", "trending", "--chain", chain, "--interval", TRENDING_INTERVAL, "--limit", str(limit)]
++
++
++def fetch_trending_payload(chain, limit=TOP_N, attempts=3):
++    """完整 Trending 响应（给 raw 存档用）。"""
++    return gmgn_with_net_retry(trending_args(chain, limit), attempts=attempts)
++
++
++def fetch_trending(chain, limit=TOP_N, attempts=3):
++    """榜单是发现源之一。网络类错误重试；429 和其它 4xx 不重试，限流进入全局冷却。"""
++    data = fetch_trending_payload(chain, limit=limit, attempts=attempts)
++    return (data.get("data") or {}).get("rank", [])
++
++
++def kline_args(chain, address, resolution, frm, to):
++    return [
+         "market", "kline", "--chain", chain, "--address", address,
+         "--resolution", resolution, "--from", str(frm), "--to", str(to),
+-    ]).get("list", [])
++    ]
++
++
++def fetch_kline(chain, address, resolution, frm, to):
++    return gmgn(kline_args(chain, address, resolution, frm, to)).get("list", [])
+ 
+ 
+ def to_seconds(t):
+diff --git a/rh_v2/market_daily.py b/rh_v2/market_daily.py
+new file mode 100644
+index 0000000..d264e16
+--- /dev/null
++++ b/rh_v2/market_daily.py
+@@ -0,0 +1,720 @@
++"""V1 每日原始数据采集：token universe → GMGN → 结构化日快照 + 原始 JSON。
++
++只做：采集、落库、存 raw、基础错误处理、基础去重、数据完整性校验。
++不做：评分、买点、强弱、阈值、预测、回测。表里只放 GMGN 返回的事实。
++
++不是独立采集器：
++- 网络调用全部经过 market_collect.gmgn()（guard_or_raise 拦共享冷却；429 / RATE_LIMIT_*
++  经 observe_error 武装 GLOBAL_GMGN_COOLDOWN），网络类错误复用 gmgn_with_net_retry。
++- 日常运行是 market_lanes 串行 GMGN 循环里的 gmgn_daily 车道（每条链 DAILY_PERIOD_SEC
++  一次，每次 DAILY_BATCH 个 token），与其它车道共用 1 req/s 节奏和冷却。
++- 日 K 写入复用 market_research.commit_kline_fetch → token_candle / daily_kline，
++  FINALIZED 合同不变：observed_at >= bar_end（当天 UTC 的 K 永远不会定稿）。
++- Trending / Trenches / Security 车道已经拉到的响应，每个 UTC 日首个有效响应顺带写
++  raw + 快照行（record_list_payload / record_security_payload），不额外请求。
++
++source 不合并：token_daily_snapshot 一行 = 一个 endpoint 的一次观测，带 source 和 fetched_at。
++"""
++import hashlib
++import json
++import os
++import sqlite3
++import subprocess
++import time
++
++import market_db as db
++
++DAY_SEC = 86400
++COLLECTOR = "daily"
++HOOK_COLLECTOR = "daily_hook"
++
++# 车道节奏。每条链每 DAILY_PERIOD_SEC 秒处理 DAILY_BATCH 个 token。
++# 默认 60s × 1 × 4 链 ≈ 5,760 token/天，每个 token 1–2 次 GMGN 请求。稳定优先于频率。
++DAILY_PERIOD_SEC = int(os.environ.get("MARKET_DAILY_PERIOD_SEC", "60"))
++DAILY_BATCH = max(1, int(os.environ.get("MARKET_DAILY_BATCH", "1")))
++# research = token_registry 里已有 50k 流动性观察的研究币（永久账本，掉榜不删）+ 种子币
++# registry = token_registry 全部
++DAILY_UNIVERSE = os.environ.get("MARKET_DAILY_UNIVERSE", "research")
++# 同一 UTC 日、同一 token，token_info 非限流失败超过这个次数就不再重试，留到明天。
++MAX_ATTEMPTS_PER_DAY = int(os.environ.get("MARKET_DAILY_MAX_ATTEMPTS", "3"))
++# 同一批内相邻两次 GMGN 请求的最小间隔，与 market_lanes.GMGN_GAP 一致。
++REQUEST_GAP_SEC = 1.05
++
++SOURCE_TOKEN_INFO = "token_info"
++SOURCE_TRENDING = "trending"
++SOURCE_TRENCHES = "trenches"
++SOURCE_SECURITY = "security"
++
++ENDPOINT_TOKEN_INFO = "token_info"
++ENDPOINT_KLINE = "market_kline"
++ENDPOINT_TRENDING = "market_trending"
++ENDPOINT_TRENCHES = "market_trenches"
++ENDPOINT_SECURITY = "token_security"
++
++LIST_ENDPOINT = {SOURCE_TRENDING: ENDPOINT_TRENDING, SOURCE_TRENCHES: ENDPOINT_TRENCHES}
++
++# 字段审计结论：这些 (source, field) 在这些链上恒为 0，是 GMGN 不计算，不是真实 0 → NULL。
++# 非 0 值照存（如果以后 GMGN 开始计算）。
++ZERO_MEANS_UNSUPPORTED = {
++    (SOURCE_TOKEN_INFO, "fresh_wallet_rate"): {"base", "eth"},
++    (SOURCE_TRENCHES, "fresh_wallet_rate"): {"base", "eth"},
++    (SOURCE_TOKEN_INFO, "bundler_rate"): {"base", "eth"},
++    (SOURCE_TRENDING, "bundler_rate"): {"base", "eth"},
++    (SOURCE_TRENCHES, "dev_team_hold_rate"): {"base", "eth"},
++}
++# Trenches 未成交行的 price / market_cap / liquidity / holder_count = 0 表示没有数据。
++ZERO_MEANS_NO_DATA = {
++    SOURCE_TRENCHES: ("price", "market_cap", "liquidity", "holder_count"),
++}
++# 跟随 Trending --interval 的字段。只有 interval == 24h 才能写进 *_24h 列。
++TRENDING_WINDOW_FIELDS = ("volume_24h", "buys_24h", "sells_24h", "swaps_24h")
++
++SNAPSHOT_COLUMNS = (
++    "symbol", "price", "market_cap", "liquidity", "total_supply",
++    "volume_24h", "buys_24h", "sells_24h", "swaps_24h", "buy_volume_24h", "sell_volume_24h",
++    "holder_count", "ath_price", "fresh_wallet_rate", "top_10_holder_rate", "dev_team_hold_rate",
++    "smart_degen_count", "renowned_count", "sniper_count", "bundler_rate",
++    "whale_wallet_count", "bot_degen_count", "creator_token_status",
++    "launchpad_status", "launch_stage", "launch_progress", "migrated_at", "token_created_at",
++    "volume_1h", "volume_6h", "buy_volume_1h", "buy_volume_6h", "sell_volume_1h", "sell_volume_6h",
++    "buys_1h", "buys_6h", "sells_1h", "sells_6h", "swaps_1h", "swaps_6h",
++)
++
++_MISSING = object()
++
++
++class ValidationError(ValueError):
++    """响应结构不符合预期。不写快照，记 collection_errors。"""
++
++
++# ---------------------------------------------------------------- 解析工具
++
++def utc_day_start(ts):
++    ts = int(ts)
++    return ts - ts % DAY_SEC
++
++
++def addr_key(address):
++    text = "" if address is None else str(address).strip()
++    return text.lower() if text.lower().startswith("0x") else text
++
++
++def _get(obj, *path):
++    cur = obj
++    for key in path:
++        if not isinstance(cur, dict) or key not in cur:
++            return _MISSING
++        cur = cur[key]
++    return cur
++
++
++def _real(v):
++    if v is _MISSING or v is None or isinstance(v, bool):
++        return None
++    if isinstance(v, str):
++        v = v.strip()
++        if not v:
++            return None
++    try:
++        n = float(v)
++    except (TypeError, ValueError):
++        return None
++    if n != n or n in (float("inf"), float("-inf")):
++        return None
++    return n
++
++
++def _int(v):
++    n = _real(v)
++    if n is None:
++        return None
++    return int(n)
++
++
++def _text(v):
++    if v is _MISSING or v is None:
++        return None
++    text = str(v)
++    return text if text != "" else None
++
++
++def _ts(v):
++    """Unix 秒。0 / 负数 / 空 = 未知 → NULL。"""
++    if v is _MISSING:
++        return None
++    return db.unix_ts(v)
++
++
++def _apply_null_rules(source, chain, row):
++    for (src, field), chains in ZERO_MEANS_UNSUPPORTED.items():
++        if src == source and chain in chains and row.get(field) == 0:
++            row[field] = None
++    for field in ZERO_MEANS_NO_DATA.get(source, ()):
++        if row.get(field) == 0:
++            row[field] = None
++    return row
++
++
++def parse_token_info(chain, data):
++    """token info → 快照字段。market_cap 不存在于 token info，恒为 NULL，不推导。"""
++    price = _get(data, "price")
++    row = {
++        "symbol": _text(_get(data, "symbol")),
++        "price": _real(_get(price, "price")),
++        "market_cap": None,
++        "liquidity": _real(_get(data, "liquidity")),
++        "total_supply": _real(_get(data, "total_supply")),
++        "volume_24h": _real(_get(price, "volume_24h")),
++        "buys_24h": _int(_get(price, "buys_24h")),
++        "sells_24h": _int(_get(price, "sells_24h")),
++        "swaps_24h": _int(_get(price, "swaps_24h")),
++        "buy_volume_24h": _real(_get(price, "buy_volume_24h")),
++        "sell_volume_24h": _real(_get(price, "sell_volume_24h")),
++        "holder_count": _int(_get(data, "holder_count")),
++        "ath_price": _real(_get(data, "ath_price")),
++        "fresh_wallet_rate": _real(_get(data, "stat", "fresh_wallet_rate")),
++        "top_10_holder_rate": _real(_get(data, "stat", "top_10_holder_rate")),
++        "dev_team_hold_rate": _real(_get(data, "stat", "dev_team_hold_rate")),
++        "smart_degen_count": _int(_get(data, "wallet_tags_stat", "smart_wallets")),
++        "renowned_count": _int(_get(data, "wallet_tags_stat", "renowned_wallets")),
++        "sniper_count": _int(_get(data, "wallet_tags_stat", "sniper_wallets")),
++        "bundler_rate": _real(_get(data, "stat", "top_bundler_trader_percentage")),
++        "whale_wallet_count": _int(_get(data, "wallet_tags_stat", "whale_wallets")),
++        "bot_degen_count": _int(_get(data, "stat", "bot_degen_count")),
++        "creator_token_status": _text(_get(data, "dev", "creator_token_status")),
++        "launchpad_status": _int(_get(data, "launchpad_status")),
++        "launch_stage": None,
++        "launch_progress": _real(_get(data, "launchpad_progress")),
++        "migrated_at": _ts(_get(data, "migrated_timestamp")),
++        "token_created_at": _ts(_get(data, "creation_timestamp")),
++    }
++    if row["holder_count"] is None:
++        row["holder_count"] = _int(_get(data, "stat", "holder_count"))
++    for window in ("1h", "6h"):
++        row[f"volume_{window}"] = _real(_get(price, f"volume_{window}"))
++        row[f"buy_volume_{window}"] = _real(_get(price, f"buy_volume_{window}"))
++        row[f"sell_volume_{window}"] = _real(_get(price, f"sell_volume_{window}"))
++        row[f"buys_{window}"] = _int(_get(price, f"buys_{window}"))
++        row[f"sells_{window}"] = _int(_get(price, f"sells_{window}"))
++        row[f"swaps_{window}"] = _int(_get(price, f"swaps_{window}"))
++    return _apply_null_rules(SOURCE_TOKEN_INFO, chain, row)
++
++
++def parse_trending_row(chain, item, interval):
++    """Trending 行。creation_timestamp 是开盘/迁移时间，不当作代币创建时间。"""
++    mcap = _get(item, "market_cap")
++    if mcap is _MISSING or mcap is None:
++        mcap = _get(item, "usd_market_cap")
++    row = {
++        "symbol": _text(_get(item, "symbol")),
++        "price": _real(_get(item, "price")),
++        "market_cap": _real(mcap),
++        "liquidity": _real(_get(item, "liquidity")),
++        "total_supply": _real(_get(item, "total_supply")),
++        "volume_24h": _real(_get(item, "volume")),
++        "buys_24h": _int(_get(item, "buys")),
++        "sells_24h": _int(_get(item, "sells")),
++        "swaps_24h": _int(_get(item, "swaps")),
++        "holder_count": _int(_get(item, "holder_count")),
++        "top_10_holder_rate": _real(_get(item, "top_10_holder_rate")),
++        "dev_team_hold_rate": _real(_get(item, "dev_team_hold_rate")),
++        "smart_degen_count": _int(_get(item, "smart_degen_count")),
++        "renowned_count": _int(_get(item, "renowned_count")),
++        "sniper_count": _int(_get(item, "sniper_count")),
++        "bundler_rate": _real(_get(item, "bundler_rate")),
++        "bot_degen_count": _int(_get(item, "bot_degen_count")),
++        "creator_token_status": _text(_get(item, "creator_token_status")),
++        "launchpad_status": _int(_get(item, "launchpad_status")),
++    }
++    if interval != "24h":
++        for field in TRENDING_WINDOW_FIELDS:
++            row[field] = None
++    return _apply_null_rules(SOURCE_TRENDING, chain, row)
++
++
++def parse_trenches_row(chain, bucket, item):
++    """Trenches 行。buy/sell_volume_24h、net_buy_24h、new_wallet_volume 不可靠，不进列（raw 里有）。"""
++    mcap = _get(item, "market_cap")
++    if mcap is _MISSING or mcap is None:
++        mcap = _get(item, "usd_market_cap")
++    row = {
++        "symbol": _text(_get(item, "symbol")),
++        "price": _real(_get(item, "price")),
++        "market_cap": _real(mcap),
++        "liquidity": _real(_get(item, "liquidity")),
++        "total_supply": _real(_get(item, "total_supply")),
++        "volume_24h": _real(_get(item, "volume_24h")),
++        "buys_24h": _int(_get(item, "buys_24h")),
++        "sells_24h": _int(_get(item, "sells_24h")),
++        "swaps_24h": _int(_get(item, "swaps_24h")),
++        "holder_count": _int(_get(item, "holder_count")),
++        "fresh_wallet_rate": _real(_get(item, "fresh_wallet_rate")),
++        "top_10_holder_rate": _real(_get(item, "top_10_holder_rate")),
++        "dev_team_hold_rate": _real(_get(item, "dev_team_hold_rate")),
++        "smart_degen_count": _int(_get(item, "smart_degen_count")),
++        "renowned_count": _int(_get(item, "renowned_count")),
++        "sniper_count": _int(_get(item, "sniper_count")),
++        "bot_degen_count": _int(_get(item, "bot_degen_count")),
++        "creator_token_status": _text(_get(item, "creator_token_status")),
++        "launchpad_status": _int(_get(item, "launchpad_status")),
++        "launch_stage": bucket,
++        "launch_progress": _real(_get(item, "progress")),
++        "migrated_at": _ts(_get(item, "complete_timestamp")),
++        "token_created_at": _ts(_get(item, "created_timestamp")),
++    }
++    return _apply_null_rules(SOURCE_TRENCHES, chain, row)
++
++
++def parse_security(chain, data):
++    row = {"top_10_holder_rate": _real(_get(data, "top_10_holder_rate"))}
++    return _apply_null_rules(SOURCE_SECURITY, chain, row)
++
++
++# ---------------------------------------------------------------- 校验
++
++def validate_token_info(address, data):
++    if not isinstance(data, dict):
++        raise ValidationError("token info payload is not an object")
++    got = data.get("address")
++    if not got or addr_key(got) != addr_key(address):
++        raise ValidationError(f"token info address mismatch: asked {address} got {got}")
++    if not isinstance(data.get("price"), dict):
++        raise ValidationError("token info has no price object")
++    price = _real(data["price"].get("price"))
++    if price is None or price < 0:
++        raise ValidationError(f"token info price invalid: {data['price'].get('price')!r}")
++
++
++def validate_kline(data):
++    if not isinstance(data, dict) or not isinstance(data.get("list"), list):
++        raise ValidationError("kline payload has no list[]")
++
++
++def trending_rows(payload):
++    if not isinstance(payload, dict):
++        raise ValidationError("trending payload is not an object")
++    rows = (payload.get("data") or {}).get("rank") if isinstance(payload.get("data"), dict) else None
++    if not isinstance(rows, list):
++        raise ValidationError("trending payload has no data.rank[]")
++    return [(None, r) for r in rows if isinstance(r, dict) and r.get("address")]
++
++
++def trenches_rows(payload):
++    import market_research as R
++    if not isinstance(payload, dict):
++        raise ValidationError("trenches payload is not an object")
++    rows = R.parse_trench_items(payload)
++    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
++    if not rows and not any(isinstance(data.get(k), list) for k in ("new_creation", "near_completion", "pump", "completed")):
++        raise ValidationError("trenches payload has no bucket lists")
++    return rows
++
++
++def request_interval(args):
++    if not args:
++        return None
++    args = list(args)
++    for i, a in enumerate(args):
++        if a == "--interval" and i + 1 < len(args):
++            return str(args[i + 1])
++    return None
++
++
++# ---------------------------------------------------------------- 持久化
++
++def save_raw(con, chain, endpoint, token_address, args, payload, fetched_at):
++    """原样 JSON 入库（json.loads 后重新序列化，键序保持）。同一观测重复写入被唯一索引忽略。"""
++    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
++    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
++    args_json = None if args is None else json.dumps(list(args), ensure_ascii=False)
++    con.execute(
++        """INSERT OR IGNORE INTO raw_responses(
++             chain, token_address, endpoint, request_args, fetched_at, payload_sha256, payload_json)
++           VALUES(?,?,?,?,?,?,?)""",
++        (chain, token_address, endpoint, args_json, int(fetched_at), digest, text),
++    )
++    row = con.execute(
++        """SELECT id FROM raw_responses
++           WHERE chain=? AND endpoint=? AND IFNULL(token_address,'')=IFNULL(?, '')
++             AND fetched_at=? AND payload_sha256=?""",
++        (chain, endpoint, token_address, int(fetched_at), digest),
++    ).fetchone()
++    return row[0] if row else None
++
++
++def save_snapshot(con, chain, token_address, source, fetched_at, fields, raw_id=None, interval=None):
++    """同一 (chain, token, source, UTC 日) 只保留第一次观测；重复写入被忽略。返回 1 = 新写入。"""
++    cols = ["chain", "token_address", "source", "snapshot_day", "fetched_at", "request_interval", "raw_id"]
++    vals = [chain, token_address, source, utc_day_start(fetched_at), int(fetched_at), interval, raw_id]
++    for col in SNAPSHOT_COLUMNS:
++        if col in fields:
++            cols.append(col)
++            vals.append(fields[col])
++    cur = con.execute(
++        f"INSERT OR IGNORE INTO token_daily_snapshot({', '.join(cols)}) VALUES({', '.join('?' * len(cols))})",
++        vals,
++    )
++    return 1 if cur.rowcount else 0
++
++
++def raw_exists_today(con, chain, endpoint, token_address, now):
++    day = utc_day_start(now)
++    # 分开写 IS NULL / = ?，让 ix_raw_lookup(chain, endpoint, token_address, fetched_at) 整段可用。
++    addr_sql = "token_address IS NULL" if token_address is None else "token_address=?"
++    args = [chain, endpoint] + ([] if token_address is None else [token_address]) + [day, day + DAY_SEC]
++    row = con.execute(
++        f"""SELECT 1 FROM raw_responses
++            WHERE chain=? AND endpoint=? AND {addr_sql}
++              AND fetched_at>=? AND fetched_at<? LIMIT 1""",
++        args,
++    ).fetchone()
++    return row is not None
++
++
++def classify_error(exc):
++    import market_sched as sched
++    if isinstance(exc, sched.RateLimited):
++        return "cooldown" if str(exc).startswith("GLOBAL_GMGN_COOLDOWN") else "rate_limited"
++    if isinstance(exc, subprocess.TimeoutExpired):
++        return "timeout"
++    if isinstance(exc, ValidationError):
++        return "validation"
++    if isinstance(exc, json.JSONDecodeError):
++        return "parse_error"
++    if isinstance(exc, sqlite3.Error):
++        return "db_error"
++    if isinstance(exc, RuntimeError):
++        return "cli_error"
++    return "error"
++
++
++def record_error(con, chain, token_address, endpoint, exc, args, now, collector=COLLECTOR):
++    con.execute(
++        """INSERT INTO collection_errors(
++             collector, chain, token_address, endpoint, bucket_day, occurred_at,
++             error_kind, error_message, request_args)
++           VALUES(?,?,?,?,?,?,?,?,?)""",
++        (
++            collector, chain, token_address, endpoint, utc_day_start(now), int(now),
++            classify_error(exc), str(exc)[:1000],
++            None if args is None else json.dumps(list(args), ensure_ascii=False),
++        ),
++    )
++
++
++# ---------------------------------------------------------------- 顺带存档（不额外请求）
++
++def record_list_payload(con, chain, source, payload, args, now):
++    """Trending / Trenches 车道已拉到的响应：每链每 UTC 日第一个有效响应写 raw + 快照行。"""
++    endpoint = LIST_ENDPOINT[source]
++    if raw_exists_today(con, chain, endpoint, None, now):
++        return 0
++    interval = request_interval(args) if source == SOURCE_TRENDING else None
++    if source == SOURCE_TRENDING:
++        rows = trending_rows(payload)
++    else:
++        rows = trenches_rows(payload)
++    raw_id = save_raw(con, chain, endpoint, None, args, payload, now)
++    written = 0
++    for bucket, item in rows:
++        if source == SOURCE_TRENDING:
++            fields = parse_trending_row(chain, item, interval)
++        else:
++            fields = parse_trenches_row(chain, bucket, item)
++        written += save_snapshot(con, chain, item["address"], source, now, fields, raw_id, interval)
++    return written
++
++
++def record_security_payload(con, chain, address, payload, args, now):
++    """Security 车道已拉到的响应：每个 token 每 UTC 日第一个有效响应写 raw + 快照行。"""
++    if not isinstance(payload, dict):
++        raise ValidationError("security payload is not an object")
++    if raw_exists_today(con, chain, ENDPOINT_SECURITY, address, now):
++        return 0
++    raw_id = save_raw(con, chain, ENDPOINT_SECURITY, address, args, payload, now)
++    return save_snapshot(con, chain, address, SOURCE_SECURITY, now, parse_security(chain, payload), raw_id)
++
++
++def safe_hook(with_db, chain, address, endpoint, args, fn, now):
++    """车道顺带存档的保护壳：失败只记 collection_errors，不影响原车道。"""
++    try:
++        return with_db(fn)
++    except Exception as e:  # noqa: BLE001 — 存档失败绝不能拖垮发现车道
++        print(f"  daily hook {endpoint}:{chain} 失败: {str(e)[:120]}", flush=True)
++        try:
++            with_db(lambda con, exc=e: record_error(con, chain, address, endpoint, exc, args, now, HOOK_COLLECTOR))
++        except Exception:
++            pass
++        return 0
++
++
++# ---------------------------------------------------------------- 每日 token 采集
++
++def token_info_args(chain, address):
++    return ["token", "info", "--chain", chain, "--address", address]
++
++
++def pick_pending(con, chain, now, limit, mode=None):
++    """今天还没有 token_info 快照、且今日失败未达上限的 universe token。
++
++    排序：今日失败少的优先 → 最近没试过的优先 → 研究币按首次 50k 时间 → 地址。
++    限流 / 冷却不算失败次数。
++    """
++    mode = mode or DAILY_UNIVERSE
++    day = utc_day_start(now)
++    if mode == "registry":
++        where = "r.chain=?"
++    else:
++        where = "r.chain=? AND (r.first_liquidity_50k_at IS NOT NULL OR r.sources_seen LIKE '%\"seed\"%')"
++    rows = con.execute(
++        f"""SELECT r.address AS address
++            FROM token_registry r
++            LEFT JOIN token_daily_snapshot s
++              ON s.chain=r.chain AND s.token_address=r.address
++             AND s.source=? AND s.snapshot_day=?
++            LEFT JOIN (
++              SELECT token_address, COUNT(*) AS n, MAX(occurred_at) AS last
++              FROM collection_errors
++              WHERE collector=? AND chain=? AND bucket_day=? AND endpoint=?
++                AND error_kind NOT IN ('rate_limited', 'cooldown')
++              GROUP BY token_address
++            ) e ON e.token_address=r.address
++            WHERE {where} AND s.id IS NULL AND COALESCE(e.n, 0) < ?
++            ORDER BY COALESCE(e.n, 0), COALESCE(e.last, 0),
++                     r.first_liquidity_50k_at IS NULL, r.first_liquidity_50k_at, r.address
++            LIMIT ?""",
++        (SOURCE_TOKEN_INFO, day, COLLECTOR, chain, day, ENDPOINT_TOKEN_INFO, chain,
++         MAX_ATTEMPTS_PER_DAY, int(limit)),
++    ).fetchall()
++    return [r[0] for r in rows]
++
++
++def universe_size(con, chain, mode=None):
++    mode = mode or DAILY_UNIVERSE
++    if mode == "registry":
++        sql = "SELECT COUNT(*) FROM token_registry WHERE chain=?"
++    else:
++        sql = ("SELECT COUNT(*) FROM token_registry WHERE chain=? AND "
++               "(first_liquidity_50k_at IS NOT NULL OR sources_seen LIKE '%\"seed\"%')")
++    return con.execute(sql, (chain,)).fetchone()[0]
++
++
++def needs_kline(con, chain, address, now):
++    """昨日 UTC 日 K 已 FINALIZED（按现有合同）就不拉；今天已经为它拉过一次也不拉。"""
++    import market_research as R
++    yesterday = utc_day_start(now) - DAY_SEC
++    row = con.execute(
++        """SELECT candle_open_ts, fetched_at, finalized_at FROM token_candle
++           WHERE chain=? AND address=? AND candle_open_ts=? AND close IS NOT NULL""",
++        (chain, address, yesterday),
++    ).fetchone()
++    if row is not None and R.bar_status(
++        row["candle_open_ts"], row["fetched_at"], now, row["finalized_at"]
++    ) == R.STATUS_FINALIZED:
++        return False
++    return not raw_exists_today(con, chain, ENDPOINT_KLINE, address, now)
++
++
++def _default_gmgn():
++    import market_collect as M
++    return M.gmgn_with_net_retry
++
++
++def collect_batch(chain, addresses, with_db, gmgn_call=None, clock=time.time,
++                  sleep=time.sleep, gap=REQUEST_GAP_SEC, kline=True):
++    """一批 token：token info（必要时再拉日 K）。
++
++    单个 token 的任何失败只写 collection_errors，继续下一个。
++    限流（RateLimited）时共享冷却已由 gmgn() 武装：记录后立刻停止本批，剩余 token 留待冷却后。
++    """
++    import market_collect as M
++    import market_research as R
++    import market_sched as sched
++    gmgn_call = gmgn_call or _default_gmgn()
++    stats = {
++        "chain": chain, "requested": len(addresses), "token_info_ok": 0, "token_info_failed": 0,
++        "kline_ok": 0, "kline_skipped": 0, "kline_failed": 0, "candles_written": 0,
++        "raw_saved": 0, "rate_limited": False, "errors": [],
++    }
++    first_request = [True]
++
++    def call(args, timeout):
++        if not first_request[0] and gap:
++            sleep(gap)
++        first_request[0] = False
++        return gmgn_call(args, timeout=timeout)
++
++    def fail(address, endpoint, exc, args):
++        now = int(clock())
++        stats["errors"].append({"address": address, "endpoint": endpoint,
++                                "kind": classify_error(exc), "error": str(exc)[:200]})
++        try:
++            with_db(lambda con: record_error(con, chain, address, endpoint, exc, args, now))
++        except Exception as db_exc:  # noqa: BLE001
++            print(f"  collection_errors 写入失败: {db_exc}", flush=True)
++        return isinstance(exc, sched.RateLimited)
++
++    for address in addresses:
++        # 1) token info
++        args = token_info_args(chain, address)
++        try:
++            data = call(args, timeout=40)
++            fetched = int(clock())
++            validate_token_info(address, data)
++
++            def write_ti(con, data=data, fetched=fetched, args=args, address=address):
++                raw_id = save_raw(con, chain, ENDPOINT_TOKEN_INFO, address, args, data, fetched)
++                return save_snapshot(con, chain, address, SOURCE_TOKEN_INFO, fetched,
++                                     parse_token_info(chain, data), raw_id)
++
++            with_db(write_ti)
++            stats["token_info_ok"] += 1
++            stats["raw_saved"] += 1
++        except Exception as e:  # noqa: BLE001
++            stats["token_info_failed"] += 1
++            if fail(address, ENDPOINT_TOKEN_INFO, e, args):
++                stats["rate_limited"] = True
++                break
++
++        # 2) 日 K：只在昨日未定稿且今天还没为它拉过时请求
++        if not kline:
++            continue
++        try:
++            want = with_db(lambda con, a=address: needs_kline(con, chain, a, int(clock())))
++        except Exception as e:  # noqa: BLE001
++            fail(address, ENDPOINT_KLINE, e, None)
++            continue
++        if not want:
++            stats["kline_skipped"] += 1
++            continue
++        now = int(clock())
++        kargs = M.kline_args(chain, address, "1d", now - R.KLINE_FETCH_WINDOW_SEC, now)
++        try:
++            data = call(kargs, timeout=60)
++            fetched = int(clock())
++            validate_kline(data)
++
++            def write_k(con, data=data, fetched=fetched, kargs=kargs, address=address):
++                save_raw(con, chain, ENDPOINT_KLINE, address, kargs, data, fetched)
++                # 复用现有写入：token_candle + daily_kline，finalized 只在 fetched >= bar_end 时写。
++                return R.commit_kline_fetch(con, chain, address, data["list"], fetched, True)
++
++            written = with_db(write_k)
++            stats["kline_ok"] += 1
++            stats["raw_saved"] += 1
++            stats["candles_written"] += written or 0
++        except Exception as e:  # noqa: BLE001
++            stats["kline_failed"] += 1
++            if fail(address, ENDPOINT_KLINE, e, kargs):
++                stats["rate_limited"] = True
++                break
++    return stats
++
++
++# ---------------------------------------------------------------- CLI（冒烟 / 手动补跑）
++
++def _parse_cli(argv):
++    opts = {"chains": [], "limit": 3, "tokens": [], "no_kline": False}
++    it = iter(argv)
++    for a in it:
++        if a == "--chain":
++            opts["chains"].extend(x for x in next(it, "").split(",") if x)
++        elif a == "--limit":
++            opts["limit"] = int(next(it, "3"))
++        elif a == "--token":
++            spec = next(it, "")
++            if ":" not in spec:
++                raise SystemExit(f"--token 需要 chain:address，收到 {spec!r}")
++            c, addr = spec.split(":", 1)
++            opts["tokens"].append((c, addr))
++        elif a == "--no-kline":
++            opts["no_kline"] = True
++        else:
++            raise SystemExit(f"未知参数 {a}")
++    return opts
++
++
++def cli_run(argv):
++    """`market_run.py daily [--chain sol] [--limit 3] [--token chain:address ...] [--no-kline]`
++
++    走与常驻 loop 相同的 collector 文件锁：loop 在跑时直接退出，绝不并发打 GMGN。
++    """
++    import market_collect as M
++    import market_lanes as L
++    opts = _parse_cli(argv)
++    try:
++        lock_fd = M.acquire_lock()
++    except M.LockBusy:
++        return {
++            "skipped": True, "reason": "lock_busy",
++            "hint": "market collector loop 正在运行；gmgn_daily 车道已在 loop 内运行。"
++                    "要单独冒烟，先 launchctl bootout com.market.collector，跑完再 bootstrap。",
++        }
++    try:
++        out = []
++        if opts["tokens"]:
++            by_chain = {}
++            for c, addr in opts["tokens"]:
++                by_chain.setdefault(c, []).append(addr)
++            plan = list(by_chain.items())
++        else:
++            chains = opts["chains"] or list(M.CHAINS)
++            now = int(time.time())
++            plan = [(c, L.with_db(lambda con, c=c: pick_pending(con, c, now, opts["limit"]))) for c in chains]
++        for chain, addresses in plan:
++            if not addresses:
++                out.append({"chain": chain, "requested": 0, "note": "今日 universe 已全部采集或为空"})
++                continue
++            stats = collect_batch(chain, addresses, L.with_db, kline=not opts["no_kline"])
++            out.append(stats)
++            if stats["rate_limited"]:
++                break
++        return {"ok": True, "batches": out}
++    finally:
++        M.release_lock(lock_fd)
++
++
++def status(con, now=None):
++    now = int(time.time() if now is None else now)
++    day = utc_day_start(now)
++    chains = [r[0] for r in con.execute(
++        """SELECT chain FROM token_registry
++           UNION SELECT chain FROM token_daily_snapshot WHERE snapshot_day=?
++           ORDER BY 1""",
++        (day,),
++    )]
++    per_chain = []
++    for chain in chains:
++        counts = {
++            r["source"]: r["n"] for r in con.execute(
++                """SELECT source, COUNT(*) AS n FROM token_daily_snapshot
++                   WHERE chain=? AND snapshot_day=? GROUP BY source""",
++                (chain, day),
++            )
++        }
++        per_chain.append({
++            "chain": chain,
++            "universe": universe_size(con, chain),
++            "snapshots_today": counts,
++            "candles_finalized_yesterday": con.execute(
++                "SELECT COUNT(*) FROM token_candle WHERE chain=? AND candle_open_ts=? AND finalized_at IS NOT NULL",
++                (chain, day - DAY_SEC),
++            ).fetchone()[0],
++        })
++    errors = [dict(r) for r in con.execute(
++        """SELECT collector, chain, endpoint, error_kind, COUNT(*) AS n FROM collection_errors
++           WHERE bucket_day=? GROUP BY collector, chain, endpoint, error_kind ORDER BY n DESC""",
++        (day,),
++    )]
++    recent = [dict(r) for r in con.execute(
++        """SELECT occurred_at, collector, chain, token_address, endpoint, error_kind,
++                  substr(error_message, 1, 160) AS error_message
++           FROM collection_errors ORDER BY id DESC LIMIT 10"""
++    )]
++    raw = [dict(r) for r in con.execute(
++        """SELECT endpoint, COUNT(*) AS n, SUM(length(payload_json)) AS bytes FROM raw_responses
++           WHERE fetched_at>=? AND fetched_at<? GROUP BY endpoint""",
++        (day, day + DAY_SEC),
++    )]
++    return {"now": now, "utc_day": day, "universe_mode": DAILY_UNIVERSE, "chains": per_chain,
++            "raw_today": raw, "errors_today": errors, "recent_errors": recent}
+diff --git a/rh_v2/market_db.py b/rh_v2/market_db.py
+index b613dcb..e5be464 100644
+--- a/rh_v2/market_db.py
++++ b/rh_v2/market_db.py
+@@ -177,6 +177,87 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
+     calculated_at INTEGER,
+     UNIQUE (chain, address, as_of_date)
+ );
++
++-- V1 每日原始快照（market_daily.py）。只存事实：不存评分、比率、排名、增长率。
++-- 一行 = 一个 endpoint 在一个 UTC 日对一个 token 的第一次成功观测；不同 source 永不合并。
++-- source: token_info / trending / trenches / security。日 K 仍写 token_candle（定稿规则不变）。
++-- 缺 key / 显式 null / 已知「GMGN 不计算」的 0 一律存 NULL；真实 0 保持 0。
++CREATE TABLE IF NOT EXISTS token_daily_snapshot (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    chain TEXT NOT NULL,
++    token_address TEXT NOT NULL,
++    source TEXT NOT NULL,
++    snapshot_day INTEGER NOT NULL,     -- UTC 日 00:00（unix 秒），去重桶
++    fetched_at INTEGER NOT NULL,       -- 这次响应的实际观测时间（unix 秒）
++    request_interval TEXT,             -- trending 请求的 --interval；其它 source 为 NULL
++    raw_id INTEGER,                    -- raw_responses.id
++    symbol TEXT,
++    price REAL,
++    market_cap REAL,                   -- token_info 没有此字段，恒为 NULL
++    liquidity REAL,
++    total_supply REAL,
++    volume_24h REAL,
++    buys_24h INTEGER,                  -- 笔数，不是人数
++    sells_24h INTEGER,
++    swaps_24h INTEGER,
++    buy_volume_24h REAL,               -- 只有 token_info 可靠，其它 source 为 NULL
++    sell_volume_24h REAL,
++    holder_count INTEGER,
++    ath_price REAL,
++    fresh_wallet_rate REAL,
++    top_10_holder_rate REAL,
++    dev_team_hold_rate REAL,
++    smart_degen_count INTEGER,
++    renowned_count INTEGER,
++    sniper_count INTEGER,
++    bundler_rate REAL,
++    whale_wallet_count INTEGER,
++    bot_degen_count INTEGER,
++    creator_token_status TEXT,
++    launchpad_status INTEGER,
++    launch_stage TEXT,                 -- trenches 分组：new_creation / near_completion / completed
++    launch_progress REAL,
++    migrated_at INTEGER,
++    token_created_at INTEGER,
++    volume_1h REAL, volume_6h REAL,
++    buy_volume_1h REAL, buy_volume_6h REAL,
++    sell_volume_1h REAL, sell_volume_6h REAL,
++    buys_1h INTEGER, buys_6h INTEGER,
++    sells_1h INTEGER, sells_6h INTEGER,
++    swaps_1h INTEGER, swaps_6h INTEGER,
++    UNIQUE (chain, token_address, source, snapshot_day)
++);
++CREATE INDEX IF NOT EXISTS ix_tds_day ON token_daily_snapshot(snapshot_day, chain, source);
++
++-- 每个有效 GMGN 响应的原样 JSON。列表 endpoint 的 token_address 为 NULL。
++CREATE TABLE IF NOT EXISTS raw_responses (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    chain TEXT NOT NULL,
++    token_address TEXT,
++    endpoint TEXT NOT NULL,            -- token_info / market_kline / market_trending / market_trenches / token_security
++    request_args TEXT,                 -- JSON 数组：实际传给 gmgn-cli 的参数
++    fetched_at INTEGER NOT NULL,
++    payload_sha256 TEXT NOT NULL,
++    payload_json TEXT NOT NULL
++);
++CREATE UNIQUE INDEX IF NOT EXISTS ux_raw_dedupe
++    ON raw_responses(chain, endpoint, IFNULL(token_address, ''), fetched_at, payload_sha256);
++CREATE INDEX IF NOT EXISTS ix_raw_lookup ON raw_responses(chain, endpoint, token_address, fetched_at);
++
++-- 采集失败明细。单个 token 失败只写这里，不让整批失败。
++CREATE TABLE IF NOT EXISTS collection_errors (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    collector TEXT NOT NULL,           -- daily / daily_hook
++    chain TEXT,
++    token_address TEXT,
++    endpoint TEXT,
++    bucket_day INTEGER,                -- UTC 日 00:00
++    occurred_at INTEGER NOT NULL,
++    error_kind TEXT NOT NULL,          -- rate_limited / cooldown / timeout / cli_error / parse_error / validation / db_error / error
++    error_message TEXT,
++    request_args TEXT
++);
++CREATE INDEX IF NOT EXISTS ix_cerr_day ON collection_errors(bucket_day, chain, token_address);
+ """
+ 
+ 
+diff --git a/rh_v2/market_health.py b/rh_v2/market_health.py
+index e022742..751f34f 100644
+--- a/rh_v2/market_health.py
++++ b/rh_v2/market_health.py
+@@ -14,9 +14,16 @@ from zoneinfo import ZoneInfo
+ FAIL_THRESHOLD = 3
+ DIVERGE_RATIO = 0.05
+ 
++
++def _daily_period():
++    """V1 每日原始快照车道周期（market_lanes.job_daily），默认 60s，MARKET_DAILY_PERIOD_SEC 可调。"""
++    import market_daily
++    return market_daily.DAILY_PERIOD_SEC
++
++
+ # (source, chain, period_sec)
+ # Trending 300s，避免 10s 扫榜占住调度。日 K 60s，并在调度里保留名额。
+-# Hot 120s，Trenches / Signal 300s。安全指标 600s。
++# Hot 120s，Trenches / Signal 300s。安全指标 600s。V1 日快照 gmgn_daily 默认 60s、优先级最低。
+ # Dex 15s、锚价 15s、Chainlink 30s 不走 GMGN 冷却。
+ def catalog():
+     rows = []
+@@ -27,6 +34,7 @@ def catalog():
+         rows.append(("gmgn_signal", chain, 300))
+         rows.append(("gmgn_kline", chain, 60))
+         rows.append(("gmgn_security", chain, 600))
++        rows.append(("gmgn_daily", chain, _daily_period()))
+         rows.append(("dexscreener", chain, 15))
+     rows.append(("robinhood_anchor", "robinhood", 15))
+     rows.append(("chainlink", "robinhood", 30))
+diff --git a/rh_v2/market_lanes.py b/rh_v2/market_lanes.py
+index 91203f4..1811d29 100644
+--- a/rh_v2/market_lanes.py
++++ b/rh_v2/market_lanes.py
+@@ -402,8 +402,10 @@ def job_gmgn(chain):
+     started = time.time()
+     if _skip_if_cooling("gmgn", chain, started):
+         return
++    M = _gmgn_mod()
+     try:
+-        items = _gmgn_mod().fetch_trending(chain, limit=TOP_N)
++        payload = M.fetch_trending_payload(chain, limit=TOP_N)
++        items = (payload.get("data") or {}).get("rank", [])
+     except Exception as e:
+         state = "rate_limited" if _rate_limited(e) else "failed"
+         _finish("gmgn", chain, False, started, error=str(e), rows_received=0, run_state=state, request_ok=0)
+@@ -419,6 +421,7 @@ def job_gmgn(chain):
+         _finish("gmgn", chain, False, started, error=str(e), rows_received=len(items), run_state="failed", request_ok=1)
+         return
+     _ = got
++    _daily_list_hook(chain, "trending", payload, M.trending_args(chain, TOP_N), now)
+     _finish_discovery("gmgn", chain, started, stats, hot=hot, cold=cold, request_ok=1)
+ 
+ 
+@@ -459,12 +462,9 @@ def job_new_pair(chain):
+     started = time.time()
+     if _skip_if_cooling("gmgn_new_pair", chain, started):
+         return
++    trench_args = ["market", "trenches", "--chain", chain, "--type", *TRENCH_TYPES, "--limit", "30"]
+     try:
+-        data = _gmgn_mod().gmgn(
+-            ["market", "trenches", "--chain", chain,
+-             "--type", *TRENCH_TYPES, "--limit", "30"],
+-            timeout=45,
+-        )
++        data = _gmgn_mod().gmgn(trench_args, timeout=45)
+     except Exception as e:
+         state = "rate_limited" if _rate_limited(e) else "failed"
+         _finish("gmgn_new_pair", chain, False, started, error=str(e), run_state=state, request_ok=0)
+@@ -475,6 +475,7 @@ def job_new_pair(chain):
+     except Exception as e:
+         _finish("gmgn_new_pair", chain, False, started, error=str(e), run_state="failed", request_ok=1)
+         return
++    _daily_list_hook(chain, "trenches", data, trench_args, now)
+     _finish_discovery("gmgn_new_pair", chain, started, stats, hot=hot, request_ok=1)
+ 
+ 
+@@ -701,11 +702,9 @@ def job_security(chain):
+     if not address:
+         _finish("gmgn_security", chain, False, started, error="还没有 token 可拉安全指标")
+         return
++    sec_args = ["token", "security", "--chain", chain, "--address", address]
+     try:
+-        data = _gmgn_mod().gmgn(
+-            ["token", "security", "--chain", chain, "--address", address],
+-            timeout=40,
+-        )
++        data = _gmgn_mod().gmgn(sec_args, timeout=40)
+     except Exception as e:
+         state = "rate_limited" if _rate_limited(e) else "failed"
+         _finish("gmgn_security", chain, False, started, error=str(e), run_state=state, request_ok=0)
+@@ -718,6 +717,7 @@ def job_security(chain):
+     except Exception as e:
+         _finish("gmgn_security", chain, False, started, error=str(e), rows_received=1)
+         return
++    _daily_security_hook(chain, address, data, sec_args, int(time.time()))
+     _finish(
+         "gmgn_security", chain, True, started,
+         rows_received=1, hot_changed=0, cold_changed=changed,
+@@ -1082,6 +1082,67 @@ def job_chainlink():
+     )
+ 
+ 
++def _daily_list_hook(chain, source, payload, args, now):
++    """V1 日快照：已拉到的 Trending / Trenches 响应，每链每 UTC 日首个写 raw + 快照行。不发请求。"""
++    import market_daily as D
++    endpoint = D.LIST_ENDPOINT[source]
++    D.safe_hook(
++        with_db, chain, None, endpoint, args,
++        lambda con: D.record_list_payload(con, chain, source, payload, args, now), now,
++    )
++
++
++def _daily_security_hook(chain, address, payload, args, now):
++    import market_daily as D
++    D.safe_hook(
++        with_db, chain, address, D.ENDPOINT_SECURITY, args,
++        lambda con: D.record_security_payload(con, chain, address, payload, args, now), now,
++    )
++
++
++def job_daily(chain):
++    """V1 每日原始快照车道：token info（+ 必要时日 K）→ token_daily_snapshot / raw_responses / token_candle。
++
++    每次只处理 DAILY_BATCH 个今天还没采到的 universe token。单 token 失败只写 collection_errors。
++    冷却期内不发请求；批内遇到限流立即停止（共享冷却已由 gmgn() 武装）。
++    """
++    import market_daily as D
++    started = time.time()
++    if _skip_if_cooling("gmgn_daily", chain, started):
++        return
++    now = int(time.time())
++    try:
++        addresses = with_db(lambda con: D.pick_pending(con, chain, now, D.DAILY_BATCH))
++    except Exception as e:
++        _finish("gmgn_daily", chain, False, started, error=str(e), run_state="failed", request_ok=0)
++        return
++    if not addresses:
++        # 今天的 universe 已全部完成（或为空）。不是失败，不累计错误。
++        _finish(
++            "gmgn_daily", chain, True, started,
++            rows_received=0, source_timestamp_missing=True, wrote_db=False,
++            run_state="day_complete", request_ok=0,
++        )
++        return
++    stats = D.collect_batch(chain, addresses, with_db, gap=GMGN_GAP)
++    wrote = stats["token_info_ok"] + stats["kline_ok"]
++    if stats["rate_limited"]:
++        state = "rate_limited"
++    elif wrote:
++        state = "healthy"
++    else:
++        state = "failed"
++    err = stats["errors"][0]["error"] if stats["errors"] else None
++    _finish(
++        "gmgn_daily", chain, state == "healthy", started,
++        rows_received=stats["token_info_ok"] + stats["token_info_failed"],
++        rows_parsed=stats["token_info_ok"], rows_written=wrote,
++        hot_changed=0, cold_changed=wrote,
++        source_timestamp_missing=True, wrote_db=bool(wrote),
++        run_state=state, request_ok=1 if wrote else 0, error=err,
++    )
++
++
+ GMGN_JOBS = {
+     "gmgn": job_gmgn,
+     "gmgn_hot": job_gmgn_hot,
+@@ -1089,9 +1150,10 @@ GMGN_JOBS = {
+     "gmgn_signal": job_signal,
+     "gmgn_kline": job_kline,
+     "gmgn_security": job_security,
++    "gmgn_daily": job_daily,
+ }
+ # 日 K 在 pick_gmgn_job 里还有保留名额，这里的顺序只作用于非保留车道。
+-GMGN_PRIORITY = ["gmgn_kline", "gmgn", "gmgn_hot", "gmgn_new_pair", "gmgn_signal", "gmgn_security"]
++GMGN_PRIORITY = ["gmgn_kline", "gmgn", "gmgn_hot", "gmgn_new_pair", "gmgn_signal", "gmgn_security", "gmgn_daily"]
+ SIDE_JOBS = {
+     "dexscreener": job_dex,
+     "robinhood_anchor": lambda chain: job_anchor(),
+diff --git a/rh_v2/market_run.py b/rh_v2/market_run.py
+index ddc975e..b071ce3 100644
+--- a/rh_v2/market_run.py
++++ b/rh_v2/market_run.py
+@@ -5,6 +5,9 @@
+   python3 market_run.py once          每条车道跑一轮后退出
+   python3 market_run.py status        按 source × chain 看心跳 / 成功 / 落库
+   python3 market_run.py status --json
++  python3 market_run.py daily [--chain sol] [--limit 3] [--token chain:address ...] [--no-kline]
++                                      V1 日快照手动小批（冒烟用；与 loop 共用文件锁和 GMGN 冷却）
++  python3 market_run.py daily-status  今日 V1 日快照覆盖率 / raw 体积 / 错误
+ 
+ loop 用文件锁。launchd 应 KeepAlive 拉起 loop，不要再用 StartInterval 整表打一轮。
+ """
+@@ -109,6 +112,16 @@ def main():
+         M.run_loop()
+     elif cmd == "status":
+         status()
++    elif cmd == "daily":
++        import market_daily as D
++        print(json.dumps(D.cli_run(sys.argv[2:]), ensure_ascii=False, indent=2, default=str))
++    elif cmd == "daily-status":
++        import market_daily as D
++        con = db.connect()
++        try:
++            print(json.dumps(D.status(con), ensure_ascii=False, indent=2, default=str))
++        finally:
++            con.close()
+     elif cmd == "phase1":
+         import market_research as research
+         con = db.connect()
+diff --git a/rh_v2/test_daily_collect.py b/rh_v2/test_daily_collect.py
+new file mode 100644
+index 0000000..6892f33
+--- /dev/null
++++ b/rh_v2/test_daily_collect.py
+@@ -0,0 +1,558 @@
++#!/usr/bin/env python3
++"""V1 每日原始数据采集。不打 GMGN、不打开运行库。
++
++GMGN CLI 用 mock 替换（subprocess.run），响应来自 docs/gmgn-audit/raw/ 里真实录制的 payload。
++日 K 没有录制 raw，按 Phase 2 实测形状（time=毫秒 UTC 日开盘、数值字符串、volume=USD）现场构造。
++"""
++import json
++import os
++import sqlite3
++import tempfile
++import time
++import types
++import unittest
++from pathlib import Path
++from unittest import mock
++
++import market_collect as collect
++import market_daily as D
++import market_db as db
++import market_lanes as lanes
++import market_research as R
++import market_sched as sched
++
++RAW = Path(__file__).resolve().parent.parent / "docs" / "gmgn-audit" / "raw"
++DAY = 86400
++
++SOL_WWW = "GAwhcphCqCv5bKHmCiN4VDdNWfbXJL4npmkc8L3Q9S9H"
++ETH_WILD = "0x57737ded3870e43fed7d80d31e0ced3d5fb0cccc"
++BASE_TOSHI = "0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4"
++
++TOKEN_INFO_FIXTURES = {
++    ("sol", SOL_WWW): "probe/sol-www-info.json",
++    ("eth", ETH_WILD): "probe/eth-wildebeest-info.json",
++    ("base", BASE_TOSHI): "probe/base-toshi-info.json",
++}
++
++
++def fixture(rel):
++    path = RAW / rel
++    if not path.exists():
++        raise FileNotFoundError(f"缺少录制 fixture: {path}")
++    with open(path, encoding="utf-8") as fh:
++        return json.load(fh)
++
++
++def _reset_sched():
++    sched._state = {"until": 0, "start": 0, "step": 0, "basis": "", "loaded": True}
++
++
++def kline_payload(to_ts):
++    """录制形状：{list:[{time(ms), open, high, low, close, volume, amount, source:""}]}，最后一根是今天（进行中）。"""
++    today = int(to_ts) - int(to_ts) % DAY
++    out = []
++    for i, day in enumerate((today - 2 * DAY, today - DAY, today)):
++        px = 0.001 * (1 + i / 10)
++        out.append({
++            "time": day * 1000,
++            "open": f"{px:.10f}", "high": f"{px * 1.2:.10f}", "low": f"{px * 0.9:.10f}",
++            "close": f"{px * 1.1:.10f}", "volume": f"{1000 + i * 10:.8f}",
++            "amount": f"{(1000 + i * 10) / px:.6f}", "source": "",
++        })
++    return {"list": out}
++
++
++def _arg(cmd, name):
++    return cmd[cmd.index(name) + 1] if name in cmd else None
++
++
++class FakeCli:
++    """替代 subprocess.run 的 gmgn-cli。记录每条实际命令。"""
++
++    def __init__(self, fail=None):
++        self.calls = []
++        # fail: callable(cmd) -> None | (returncode, stderr)
++        self.fail = fail or (lambda cmd: None)
++
++    def __call__(self, cmd, capture_output=True, text=True, timeout=None):
++        self.calls.append(list(cmd))
++        failure = self.fail(cmd)
++        if failure:
++            code, err = failure
++            return types.SimpleNamespace(returncode=code, stdout="", stderr=err)
++        body = cmd[1:-1]  # 去掉 gmgn-cli 和 --raw
++        chain = _arg(body, "--chain")
++        if body[:2] == ["token", "info"]:
++            payload = fixture(TOKEN_INFO_FIXTURES[(chain, _arg(body, "--address"))])
++        elif body[:2] == ["market", "kline"]:
++            payload = kline_payload(int(_arg(body, "--to")))
++        elif body[:2] == ["market", "trending"]:
++            payload = fixture(f"v1/{chain}-trending.json")
++        elif body[:2] == ["market", "trenches"]:
++            payload = fixture(f"v1/{chain}-trenches.json")
++        elif body[:2] == ["token", "security"]:
++            payload = fixture(f"v1/{chain}-security.json")
++        else:
++            raise AssertionError(f"unexpected GMGN command {cmd}")
++        return types.SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
++
++
++class DbCase(unittest.TestCase):
++    """每个用例一个临时库；market_db.DB_PATH 指向它（with_db / 冷却持久化都写这里）。"""
++
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory()
++        self.path = os.path.join(self.tmp.name, "market.sqlite")
++        self._old_path = db.DB_PATH
++        db.DB_PATH = self.path
++        _reset_sched()
++        self.con = db.connect(self.path)
++
++    def tearDown(self):
++        self.con.close()
++        db.DB_PATH = self._old_path
++        _reset_sched()
++        self.tmp.cleanup()
++
++    def seed_research(self, chain, address, seen_at=1_790_000_000):
++        R.ingest_discovery(self.con, chain, address, "trending", seen_at, liquidity=100_000)
++        self.con.commit()
++
++    def q(self, sql, args=()):
++        return self.con.execute(sql, args).fetchall()
++
++
++# ---------------------------------------------------------------- schema / migration
++
++LEGACY_PROD_SCHEMA = """
++CREATE TABLE tokens (chain TEXT NOT NULL, address TEXT NOT NULL, symbol TEXT, name TEXT, logo TEXT,
++  creation_ts INTEGER, token_created_at INTEGER, pair_created_at INTEGER, first_seen_at INTEGER,
++  kline_fetched_at INTEGER, PRIMARY KEY (chain, address));
++CREATE TABLE hourly_price (chain TEXT NOT NULL, address TEXT NOT NULL, ts INTEGER NOT NULL,
++  price TEXT NOT NULL, PRIMARY KEY (chain, address, ts));
++CREATE TABLE daily_kline (chain TEXT NOT NULL, address TEXT NOT NULL, ts INTEGER NOT NULL,
++  open TEXT, high TEXT, low TEXT, close TEXT, volume TEXT, amount TEXT, fetched_at INTEGER,
++  finalized_at INTEGER, PRIMARY KEY (chain, address, ts));
++CREATE TABLE token_snapshot (chain TEXT NOT NULL, address TEXT NOT NULL, ts INTEGER NOT NULL,
++  price TEXT, pc_24h TEXT, volume_24h TEXT, liquidity TEXT, market_cap TEXT, holders INTEGER,
++  price_ds TEXT, volume_ds TEXT, liquidity_ds TEXT, dex_price TEXT, diverge INTEGER,
++  anchor_bid TEXT, anchor_ask TEXT, anchor_generated_at INTEGER, anchor_multiplier TEXT,
++  halt INTEGER, market_closed INTEGER, oracle_price TEXT, oracle_updated_at INTEGER,
++  smart_degen_count INTEGER, sniper_count INTEGER, renowned_count INTEGER,
++  top10_holder_rate TEXT, rat_trader_rate TEXT, bundler_rate TEXT, swaps INTEGER,
++  commit_ok INTEGER, chg_price INTEGER, chg_volume INTEGER, chg_liquidity INTEGER,
++  security_note TEXT, liquidity_num REAL, liquidity_updated_at INTEGER,
++  PRIMARY KEY (chain, address));
++CREATE TABLE market_meta (k TEXT PRIMARY KEY, v TEXT);
++CREATE TABLE source_health (source TEXT NOT NULL, chain TEXT NOT NULL, period_sec INTEGER NOT NULL,
++  collector_heartbeat INTEGER, last_attempt INTEGER, last_success INTEGER,
++  round_ok INTEGER NOT NULL DEFAULT 0, source_timestamp INTEGER,
++  source_timestamp_missing INTEGER NOT NULL DEFAULT 1, db_written_at INTEGER, ui_fetched_at INTEGER,
++  last_change_at INTEGER, rows_received INTEGER NOT NULL DEFAULT 0,
++  hot_changed INTEGER NOT NULL DEFAULT 0, cold_changed INTEGER NOT NULL DEFAULT 0,
++  latency_ms INTEGER, consecutive_errors INTEGER NOT NULL DEFAULT 0, last_error TEXT,
++  attempts INTEGER NOT NULL DEFAULT 0, successes INTEGER NOT NULL DEFAULT 0,
++  has_display_rows INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (source, chain));
++CREATE TABLE token_registry (chain TEXT NOT NULL, address TEXT NOT NULL, symbol TEXT, name TEXT,
++  first_seen_at INTEGER, last_seen_at INTEGER, first_source TEXT, sources_seen TEXT,
++  first_liquidity_50k_at INTEGER, liquidity_50k_observation_type TEXT, source_at_50k TEXT,
++  kline_backfilled_at INTEGER, kline_retry_after INTEGER, qualified_at INTEGER,
++  token_created_at INTEGER, token_created_at_source TEXT,
++  seen_liquidity_below_50k INTEGER NOT NULL DEFAULT 0, updated_at INTEGER,
++  PRIMARY KEY (chain, address));
++CREATE TABLE token_candle (chain TEXT NOT NULL, address TEXT NOT NULL, candle_open_ts INTEGER NOT NULL,
++  open REAL, high REAL, low REAL, close REAL, volume REAL, amount REAL, fetched_at INTEGER,
++  finalized_at INTEGER, is_closed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (chain, address, candle_open_ts));
++"""
++
++
++class SchemaMigrationTest(unittest.TestCase):
++    NEW_TABLES = ("token_daily_snapshot", "raw_responses", "collection_errors")
++
++    def _tables(self, con):
++        return {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
++
++    def _indexes(self, con):
++        return {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
++
++    def test_fresh_db_creates_tables_and_is_idempotent(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            path = tmp + "/fresh.sqlite"
++            for _ in range(2):
++                con = db.connect(path)
++                for t in self.NEW_TABLES:
++                    self.assertIn(t, self._tables(con))
++                self.assertIn("ux_raw_dedupe", self._indexes(con))
++                cols = {r[1] for r in con.execute("PRAGMA table_info(token_daily_snapshot)")}
++                for c in ("token_address", "chain", "symbol", "fetched_at", "source", "price",
++                          "market_cap", "liquidity", "total_supply", "volume_24h", "buys_24h",
++                          "sells_24h", "swaps_24h", "buy_volume_24h", "sell_volume_24h",
++                          "holder_count", "raw_id", "request_interval"):
++                    self.assertIn(c, cols)
++                # 只存事实：不能有派生/评分列
++                for banned in ("score", "strong", "buy_share", "volume_ratio", "holder_growth",
++                               "liquidity_growth", "up_days_8d", "rank"):
++                    self.assertFalse(any(banned in c for c in cols), banned)
++                self.assertEqual(con.execute("PRAGMA integrity_check").fetchone()[0], "ok")
++                con.close()
++
++    def test_legacy_production_schema_migrates_additively(self):
++        """生产 market.sqlite 仍是 Phase 4 之前的 schema（token_snapshot 36 列）。
++
++        .grokbot-export 的真实 schema 导出失败，这里按代码历史重建该 schema 并带数据迁移。
++        """
++        with tempfile.TemporaryDirectory() as tmp:
++            path = tmp + "/legacy.sqlite"
++            raw = sqlite3.connect(path)
++            raw.executescript(LEGACY_PROD_SCHEMA)
++            self.assertEqual(len(raw.execute("PRAGMA table_info(token_snapshot)").fetchall()), 36)
++            day = 1_790_899_200
++            raw.execute("INSERT INTO tokens(chain,address,symbol,first_seen_at,kline_fetched_at) VALUES('sol','A','AAA',1,?)", (day + DAY + 60,))
++            raw.execute("INSERT INTO token_snapshot(chain,address,ts,price,liquidity) VALUES('sol','A',5,'1.5','60000')")
++            raw.execute("INSERT INTO token_registry(chain,address,first_seen_at,first_liquidity_50k_at,sources_seen) VALUES('sol','A',1,2,'[\"trending\"]')")
++            raw.execute("INSERT INTO daily_kline(chain,address,ts,close,fetched_at) VALUES('sol','A',?,'2.0',?)", (day, day + DAY + 60))
++            raw.execute("INSERT INTO market_meta(k,v) VALUES('gmgn_cooldown_until','0')")
++            raw.commit()
++            raw.close()
++            for _ in range(2):
++                con = db.connect(path)
++                for t in self.NEW_TABLES:
++                    self.assertIn(t, self._tables(con))
++                self.assertEqual(con.execute("SELECT price FROM token_snapshot WHERE address='A'").fetchone()[0], "1.5")
++                self.assertEqual(con.execute("SELECT COUNT(*) FROM token_registry").fetchone()[0], 1)
++                self.assertEqual(con.execute("SELECT close FROM daily_kline WHERE address='A'").fetchone()[0], "2.0")
++                self.assertEqual(con.execute("SELECT COUNT(*) FROM token_daily_snapshot").fetchone()[0], 0)
++                self.assertEqual(con.execute("PRAGMA integrity_check").fetchone()[0], "ok")
++                con.close()
++            # 迁移后新代码能直接写
++            con = db.connect(path)
++            D.save_snapshot(con, "sol", "A", D.SOURCE_TOKEN_INFO, day + 100, {"price": 1.0})
++            con.commit()
++            self.assertEqual(con.execute("SELECT COUNT(*) FROM token_daily_snapshot").fetchone()[0], 1)
++            con.close()
++
++
++# ---------------------------------------------------------------- 解析 / NULL 规则
++
++class ParseTest(unittest.TestCase):
++    def test_token_info_eth_core_fields_and_null_rules(self):
++        data = fixture("probe/eth-wildebeest-info.json")
++        row = D.parse_token_info("eth", data)
++        self.assertIsNone(row["market_cap"])  # token info 没有 market_cap
++        self.assertAlmostEqual(row["price"], 0.00036389837)
++        self.assertAlmostEqual(row["liquidity"], 77023.07308774616)
++        self.assertEqual(row["total_supply"], 1_000_000_000.0)
++        self.assertEqual((row["buys_24h"], row["sells_24h"], row["swaps_24h"]), (251, 160, 411))
++        self.assertAlmostEqual(row["buy_volume_24h"] + row["sell_volume_24h"], row["volume_24h"], places=4)
++        self.assertEqual(row["holder_count"], 1280)
++        self.assertAlmostEqual(row["ath_price"], 0.0029877122)
++        # ETH 上 fresh_wallet_rate / bundler_rate 恒 0 = GMGN 不计算 → NULL
++        self.assertIsNone(row["fresh_wallet_rate"])
++        self.assertIsNone(row["bundler_rate"])
++        # token info 的 dev_team_hold_rate 不在不支持清单里：真实 0 保持 0
++        self.assertEqual(row["dev_team_hold_rate"], 0.0)
++        self.assertEqual(row["smart_degen_count"], 48)
++        self.assertEqual(row["whale_wallet_count"], 6)
++        self.assertEqual(row["creator_token_status"], "creator_close")
++        self.assertEqual(row["token_created_at"], 1789807571)
++        self.assertEqual(row["migrated_at"], 1789807703)
++        self.assertEqual(row["volume_1h"], 1145.24784775)
++        self.assertEqual(row["swaps_6h"], 85)
++
++    def test_token_info_sol_keeps_real_rates_and_base_zero_timestamps(self):
++        sol = D.parse_token_info("sol", fixture("probe/sol-www-info.json"))
++        self.assertAlmostEqual(sol["fresh_wallet_rate"], 0.1531)
++        self.assertAlmostEqual(sol["bundler_rate"], 0.4203)
++        base = D.parse_token_info("base", fixture("probe/base-toshi-info.json"))
++        self.assertIsNone(base["migrated_at"])  # 0 = 未知
++        self.assertIsNone(base["fresh_wallet_rate"])
++
++    def test_trending_interval_guard(self):
++        item = fixture("v1/sol-trending.json")["data"]["rank"][0]
++        ok = D.parse_trending_row("sol", item, "24h")
++        self.assertIsNotNone(ok["volume_24h"])
++        self.assertIsNotNone(ok["market_cap"])
++        self.assertNotIn("buy_volume_24h", ok)
++        wrong = D.parse_trending_row("sol", item, "1h")
++        for f in D.TRENDING_WINDOW_FIELDS:
++            self.assertIsNone(wrong[f])
++        self.assertIsNone(D.parse_trending_row("sol", item, None)["volume_24h"])
++
++    def test_trenches_zero_rules(self):
++        payload = fixture("v1/eth-trenches.json")
++        rows = R.parse_trench_items(payload)
++        parsed = [D.parse_trenches_row("eth", b, r) for b, r in rows]
++        self.assertTrue(all(p["fresh_wallet_rate"] is None for p in parsed))
++        self.assertTrue(all(p["dev_team_hold_rate"] is None or p["dev_team_hold_rate"] != 0 for p in parsed))
++        self.assertTrue(all(p["liquidity"] is None or p["liquidity"] != 0 for p in parsed))
++        self.assertTrue(all(p["price"] is None or p["price"] > 0 for p in parsed))
++        self.assertTrue(all("buy_volume_24h" not in p and "net_buy_24h" not in p for p in parsed))
++        self.assertEqual({p["launch_stage"] for p in parsed}, {"new_creation", "near_completion", "completed"})
++
++    def test_validation(self):
++        good = fixture("probe/eth-wildebeest-info.json")
++        D.validate_token_info(ETH_WILD.upper().replace("0X", "0x"), good)
++        with self.assertRaises(D.ValidationError):
++            D.validate_token_info(BASE_TOSHI, good)
++        with self.assertRaises(D.ValidationError):
++            D.validate_token_info(ETH_WILD, {"address": ETH_WILD})
++        with self.assertRaises(D.ValidationError):
++            D.validate_kline({"data": []})
++
++
++# ---------------------------------------------------------------- 去重 / raw
++
++class DedupeTest(DbCase):
++    def test_same_token_same_day_is_ignored_next_day_is_new(self):
++        t0 = 1_790_900_000
++        a = D.save_snapshot(self.con, "sol", "X", "token_info", t0, {"price": 1.0})
++        b = D.save_snapshot(self.con, "sol", "X", "token_info", t0 + 3600, {"price": 2.0})
++        c = D.save_snapshot(self.con, "sol", "X", "trending", t0 + 3600, {"price": 3.0})
++        d = D.save_snapshot(self.con, "sol", "X", "token_info", t0 + DAY, {"price": 4.0})
++        self.con.commit()
++        self.assertEqual((a, b, c, d), (1, 0, 1, 1))
++        rows = self.q("SELECT source, price, fetched_at FROM token_daily_snapshot ORDER BY id")
++        self.assertEqual([(r[0], r[1]) for r in rows], [("token_info", 1.0), ("trending", 3.0), ("token_info", 4.0)])
++        self.assertEqual(rows[0][2], t0)  # 第一次观测保留，不被同日后续覆盖
++
++    def test_raw_dedupe_and_queryable(self):
++        payload = fixture("probe/sol-www-info.json")
++        i1 = D.save_raw(self.con, "sol", "token_info", SOL_WWW, ["token", "info"], payload, 100)
++        i2 = D.save_raw(self.con, "sol", "token_info", SOL_WWW, ["token", "info"], payload, 100)
++        i3 = D.save_raw(self.con, "sol", "market_trending", None, None, {"data": {"rank": []}}, 100)
++        i4 = D.save_raw(self.con, "sol", "market_trending", None, None, {"data": {"rank": []}}, 100)
++        self.con.commit()
++        self.assertEqual(i1, i2)
++        self.assertEqual(i3, i4)
++        self.assertEqual(self.q("SELECT COUNT(*) FROM raw_responses")[0][0], 2)
++        got = self.q("SELECT json_extract(payload_json, '$.price.buy_volume_24h') FROM raw_responses WHERE id=?", (i1,))
++        self.assertEqual(got[0][0], payload["price"]["buy_volume_24h"])
++
++
++# ---------------------------------------------------------------- 采集冒烟（mock GMGN）
++
++class CollectorSmokeTest(DbCase):
++    def setUp(self):
++        super().setUp()
++        for chain, addr in TOKEN_INFO_FIXTURES:
++            self.seed_research(chain, addr)
++        self.now = int(time.time())
++        self.today = self.now - self.now % DAY
++
++    def test_batch_persists_successes_and_survives_one_failure(self):
++        fake = FakeCli(fail=lambda cmd: (1, "Error: upstream 500 internal") if "eth" in cmd else None)
++        guard_calls = []
++        real_guard = sched.guard_or_raise
++        sleeps = []
++
++        def counting_guard(now=None):
++            guard_calls.append(now)
++            return real_guard(now)
++
++        with mock.patch.object(collect.subprocess, "run", fake), \
++                mock.patch.object(sched, "guard_or_raise", counting_guard):
++            stats = []
++            for chain, addr in (("sol", SOL_WWW), ("eth", ETH_WILD), ("base", BASE_TOSHI)):
++                stats.append(D.collect_batch(chain, [addr], lanes.with_db, clock=lambda: self.now,
++                                             sleep=sleeps.append))
++            # 同链多 token 一批：失败的 token 不中断后面的 token
++            fake2 = FakeCli(fail=lambda cmd: (1, "Error: bad token") if "BAD" in cmd else None)
++            with mock.patch.object(collect.subprocess, "run", fake2):
++                self.seed_research("sol", "BAD")
++                mixed = D.collect_batch("sol", ["BAD", SOL_WWW], lanes.with_db,
++                                        clock=lambda: self.now, sleep=sleeps.append)
++
++        # 守卫：每次实际 CLI 调用之前都经过 guard_or_raise
++        self.assertEqual(len(guard_calls), len(fake.calls) + len(fake2.calls))
++        self.assertGreater(len(sleeps), 0)  # 批内请求间隔
++        # 成功的 token 落库（sol / base），eth 失败
++        rows = self.q("""SELECT chain, token_address, source, fetched_at, market_cap, raw_id, price,
++                                buy_volume_24h, sell_volume_24h, volume_24h, symbol
++                         FROM token_daily_snapshot WHERE source='token_info' ORDER BY chain""")
++        self.assertEqual([(r["chain"], r["token_address"]) for r in rows], [("base", BASE_TOSHI), ("sol", SOL_WWW)])
++        for r in rows:
++            self.assertEqual(r["fetched_at"], self.now)
++            self.assertIsNone(r["market_cap"])
++            self.assertIsNotNone(r["raw_id"])
++            self.assertAlmostEqual(r["buy_volume_24h"] + r["sell_volume_24h"], r["volume_24h"], places=3)
++        # raw 原样可查
++        raw = self.q("SELECT endpoint, token_address, json_extract(payload_json,'$.address') AS a FROM raw_responses WHERE endpoint='token_info'")
++        self.assertEqual({(r["token_address"], r["a"]) for r in raw}, {(SOL_WWW, SOL_WWW), (BASE_TOSHI, BASE_TOSHI)})
++        # 错误落库，不抛
++        errs = self.q("SELECT chain, token_address, endpoint, error_kind, error_message FROM collection_errors ORDER BY id")
++        eth_errs = [e for e in errs if e["chain"] == "eth"]
++        self.assertEqual({e["endpoint"] for e in eth_errs}, {"token_info", "market_kline"})
++        self.assertTrue(all(e["error_kind"] == "cli_error" for e in eth_errs))
++        self.assertIn("upstream 500", eth_errs[0]["error_message"])
++        self.assertEqual(stats[1]["token_info_failed"], 1)
++        self.assertEqual(stats[2]["token_info_ok"], 1)
++        self.assertEqual(mixed["token_info_failed"], 1)
++        self.assertEqual(mixed["requested"], 2)
++        self.assertTrue(any(e["token_address"] == "BAD" for e in errs))
++
++        # 日 K：今天 UTC 的 K 不定稿；昨天的定稿（复用 observed_at >= bar_end 合同）
++        candles = {r["candle_open_ts"]: r for r in self.q(
++            "SELECT candle_open_ts, fetched_at, finalized_at, is_closed, volume, amount FROM token_candle WHERE chain='sol' AND address=?",
++            (SOL_WWW,))}
++        today_bar = candles[self.today]
++        y_bar = candles[self.today - DAY]
++        self.assertIsNone(today_bar["finalized_at"])
++        self.assertEqual(today_bar["is_closed"], 0)
++        self.assertEqual(R.bar_status(self.today, today_bar["fetched_at"], self.now, today_bar["finalized_at"]), R.STATUS_OPEN)
++        self.assertEqual(y_bar["finalized_at"], self.now)
++        self.assertEqual(y_bar["is_closed"], 1)
++        self.assertEqual(R.bar_status(self.today - DAY, y_bar["fetched_at"], self.now, y_bar["finalized_at"]), R.STATUS_FINALIZED)
++        self.assertIsNotNone(today_bar["amount"])
++        mirror = self.q("SELECT finalized_at FROM daily_kline WHERE chain='sol' AND address=? AND ts=?", (SOL_WWW, self.today))
++        self.assertIsNone(mirror[0][0])
++        self.assertEqual(self.q("SELECT COUNT(*) FROM raw_responses WHERE endpoint='market_kline' AND token_address=?", (SOL_WWW,))[0][0], 1)
++
++        # 同日重跑：不产生重复快照；昨日已定稿 → 不再拉日 K
++        with mock.patch.object(collect.subprocess, "run", FakeCli()) as again:
++            D.collect_batch("sol", [SOL_WWW], lanes.with_db, clock=lambda: self.now + 60, sleep=lambda s: None)
++        self.assertEqual(self.q("SELECT COUNT(*) FROM token_daily_snapshot WHERE chain='sol' AND source='token_info' AND token_address=?", (SOL_WWW,))[0][0], 1)
++        self.assertEqual([c[1:3] for c in again.calls], [["token", "info"]])
++
++    def test_rate_limit_arms_shared_cooldown_and_stops_batch(self):
++        addrs = [SOL_WWW, "SOL2", "SOL3"]
++        for a in addrs[1:]:
++            self.seed_research("sol", a)
++
++        def fail(cmd):
++            if "SOL2" in cmd:
++                return (1, "HTTP 429 code=429 error=RATE_LIMIT_EXCEEDED Retry-After: 120")
++            return None
++
++        fake = FakeCli(fail=fail)
++        arm_calls = []
++        real_arm = sched.arm_cooldown
++
++        def spy_arm(now, decision, con=None):
++            arm_calls.append(decision)
++            return real_arm(now, decision, con=con)
++
++        before = int(time.time())
++        with mock.patch.object(collect.subprocess, "run", fake), \
++                mock.patch.object(sched, "arm_cooldown", spy_arm):
++            stats = D.collect_batch("sol", addrs, lanes.with_db, sleep=lambda s: None)
++        self.assertTrue(stats["rate_limited"])
++        self.assertEqual(len(arm_calls), 1)
++        self.assertEqual(arm_calls[0]["basis"], "retry_after")
++        # 共享冷却：进程内 + market_meta 持久化（其它进程/重启后可见）
++        self.assertGreaterEqual(sched.cooldown_until(), before + 120)
++        persisted = int(db.meta_get(self.con, "gmgn_cooldown_until"))
++        self.assertGreaterEqual(persisted, before + 120)
++        # 批次在限流处停止：SOL3 从未请求
++        self.assertFalse(any("SOL3" in c for c in fake.calls))
++        err = self.q("SELECT error_kind, token_address FROM collection_errors")
++        self.assertEqual([(e[0], e[1]) for e in err], [("rate_limited", "SOL2")])
++        # SOL_WWW 已经落库
++        self.assertEqual(self.q("SELECT COUNT(*) FROM token_daily_snapshot WHERE token_address=?", (SOL_WWW,))[0][0], 1)
++        # 限流不计入失败次数：SOL2 / SOL3 仍待采
++        pending = D.pick_pending(self.con, "sol", int(time.time()), 10)
++        self.assertEqual(set(pending), {"SOL2", "SOL3"})
++
++        # 冷却期内车道不发任何请求，source_health 记 cooldown
++        idle = FakeCli()
++        with mock.patch.object(collect.subprocess, "run", idle):
++            lanes.job_daily("sol")
++            with self.assertRaises(sched.RateLimited):
++                collect.gmgn(D.token_info_args("sol", "SOL2"))
++        self.assertEqual(idle.calls, [])
++        con = db.connect(self.path)
++        row = con.execute("SELECT run_state FROM source_health WHERE source='gmgn_daily' AND chain='sol'").fetchone()
++        con.close()
++        self.assertEqual(row[0], "cooldown")
++
++    def test_fallback_backoff_ladder_is_the_shared_one(self):
++        fake = FakeCli(fail=lambda cmd: (1, "HTTP 429 RATE_LIMIT_BANNED"))
++        with mock.patch.object(collect.subprocess, "run", fake):
++            D.collect_batch("sol", [SOL_WWW], lanes.with_db, sleep=lambda s: None)
++        # 无 reset/retry-after → 共享阶梯 5→10→20→40→60 的第一级
++        self.assertEqual(sched._state["basis"], "fallback")
++        self.assertEqual(sched._state["step"], 1)
++        self.assertEqual(sched.FALLBACK_SEC[0], 5)
++
++    def test_lane_job_end_to_end_and_day_complete(self):
++        fake = FakeCli()
++        with mock.patch.object(collect.subprocess, "run", fake), \
++                mock.patch.object(lanes, "GMGN_GAP", 0), mock.patch.object(D, "DAILY_BATCH", 5):
++            lanes.job_daily("sol")
++            n_first = len(fake.calls)
++            lanes.job_daily("sol")  # 今天已完成：不再请求
++        self.assertEqual(n_first, 2)  # token info + kline
++        self.assertEqual(len(fake.calls), 2)
++        con = db.connect(self.path)
++        row = con.execute("SELECT run_state FROM source_health WHERE source='gmgn_daily' AND chain='sol'").fetchone()
++        n = con.execute("SELECT COUNT(*) FROM token_daily_snapshot WHERE chain='sol'").fetchone()[0]
++        con.close()
++        self.assertEqual(row[0], "day_complete")
++        self.assertEqual(n, 1)
++
++    def test_pick_pending_attempt_cap_and_universe(self):
++        R.ingest_discovery(self.con, "sol", "LOWLIQ", "trending", 1_790_000_000, liquidity=1_000)
++        self.con.commit()
++        now = self.now
++        self.assertIn(SOL_WWW, D.pick_pending(self.con, "sol", now, 10))
++        self.assertNotIn("LOWLIQ", D.pick_pending(self.con, "sol", now, 10))  # research universe
++        self.assertIn("LOWLIQ", D.pick_pending(self.con, "sol", now, 10, mode="registry"))
++        for _ in range(D.MAX_ATTEMPTS_PER_DAY):
++            D.record_error(self.con, "sol", SOL_WWW, "token_info", RuntimeError("x"), None, now)
++        self.con.commit()
++        self.assertNotIn(SOL_WWW, D.pick_pending(self.con, "sol", now, 10))
++        self.assertIn(SOL_WWW, D.pick_pending(self.con, "sol", now + DAY, 10))  # 明天重来
++
++
++# ---------------------------------------------------------------- 现有车道顺带存档
++
++class LaneHookTest(DbCase):
++    def test_trending_passes_interval_24h_and_archives_once_per_day(self):
++        fake = FakeCli()
++        with mock.patch.object(collect.subprocess, "run", fake):
++            lanes.job_gmgn("sol")
++            lanes.job_gmgn("sol")
++        cmd = fake.calls[0]
++        self.assertEqual(cmd[1:3], ["market", "trending"])
++        self.assertEqual(cmd[cmd.index("--interval") + 1], "24h")
++        self.assertEqual(len(fake.calls), 2)
++        self.assertEqual(self.q("SELECT COUNT(*) FROM raw_responses WHERE endpoint='market_trending'")[0][0], 1)
++        args = json.loads(self.q("SELECT request_args FROM raw_responses WHERE endpoint='market_trending'")[0][0])
++        self.assertEqual(args[args.index("--interval") + 1], "24h")
++        rows = self.q("SELECT request_interval, market_cap, buy_volume_24h, volume_24h, source, raw_id FROM token_daily_snapshot WHERE source='trending'")
++        n_rank = len([r for r in fixture("v1/sol-trending.json")["data"]["rank"] if r.get("address")])
++        self.assertEqual(len(rows), n_rank)
++        self.assertTrue(all(r["request_interval"] == "24h" for r in rows))
++        self.assertTrue(all(r["buy_volume_24h"] is None for r in rows))
++        self.assertTrue(all(r["market_cap"] is not None for r in rows))
++        self.assertTrue(all(r["raw_id"] is not None for r in rows))
++        # 原有车道写入不受影响
++        self.assertGreater(self.q("SELECT COUNT(*) FROM token_snapshot WHERE chain='sol'")[0][0], 0)
++
++    def test_trenches_and_security_hooks(self):
++        fake = FakeCli()
++        with mock.patch.object(collect.subprocess, "run", fake):
++            lanes.job_new_pair("eth")
++        tr = self.q("SELECT launch_stage, fresh_wallet_rate, liquidity FROM token_daily_snapshot WHERE source='trenches' AND chain='eth'")
++        self.assertGreater(len(tr), 0)
++        self.assertTrue(all(r["fresh_wallet_rate"] is None for r in tr))
++        self.assertTrue(all(r["liquidity"] is None or r["liquidity"] > 0 for r in tr))
++        self.assertEqual(self.q("SELECT COUNT(*) FROM raw_responses WHERE endpoint='market_trenches'")[0][0], 1)
++        sec = fixture("v1/eth-security.json")
++        n = D.record_security_payload(self.con, "eth", sec["address"], sec, ["token", "security"], 1_790_900_000)
++        again = D.record_security_payload(self.con, "eth", sec["address"], sec, ["token", "security"], 1_790_900_500)
++        self.con.commit()
++        self.assertEqual((n, again), (1, 0))
++        row = self.q("SELECT source, top_10_holder_rate FROM token_daily_snapshot WHERE source='security'")[0]
++        self.assertAlmostEqual(row["top_10_holder_rate"], float(sec["top_10_holder_rate"]))
++
++    def test_hook_failure_is_recorded_and_isolated(self):
++        out = D.safe_hook(lanes.with_db, "sol", None, "market_trending", ["x"],
++                          lambda con: D.record_list_payload(con, "sol", "trending", {"bad": 1}, ["x"], 100), 100)
++        self.assertEqual(out, 0)
++        err = self.q("SELECT collector, error_kind FROM collection_errors")
++        self.assertEqual([(e[0], e[1]) for e in err], [("daily_hook", "validation")])
++        self.assertEqual(self.q("SELECT COUNT(*) FROM raw_responses")[0][0], 0)
++
++
++if __name__ == "__main__":
++    unittest.main()

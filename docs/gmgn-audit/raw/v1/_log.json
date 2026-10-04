@@ -1,0 +1,285 @@
+{
+ "security_addresses": {
+  "sol": "23Qh7W7ZdXXVJarqprTjuVKBQH1vpqfU6R3gXY4Zpump",
+  "robinhood": "0x88ad8ddf1e3898412146a534538d418c6f8a9062",
+  "base": "0x0c583e4b9b1ebdb09a8e01fa6fd47a825dc1d627",
+  "eth": "0xaca92e438df0b2401ff60da7e4337b687a2435da"
+ },
+ "requests": [
+  {
+   "chain": "sol",
+   "endpoint": "trending",
+   "args": [
+    "market",
+    "trending",
+    "--chain",
+    "sol",
+    "--interval",
+    "24h",
+    "--limit",
+    "100"
+   ],
+   "rc": 0,
+   "fetched_at": 1790995934,
+   "ms": 1175
+  },
+  {
+   "chain": "sol",
+   "endpoint": "hot",
+   "args": [
+    "market",
+    "hot-searches",
+    "--chain",
+    "sol",
+    "--limit",
+    "100"
+   ],
+   "rc": 1,
+   "fetched_at": 1790995937,
+   "ms": 1138,
+   "error": "[gmgn-cli] POST /v1/market/hot_searches failed: HTTP 429 code=429 error=RATE_LIMIT_BANNED message=account is temporarily banned due to repeated rate limit violations. Rate limit resets at 2026-10-03 10:52:50 GMT+08:00 (~32s remaining). Stop sending requests before then; repeated requests can extend "
+  },
+  {
+   "chain": "sol",
+   "endpoint": "hot",
+   "args": [
+    "market",
+    "hot-searches",
+    "--chain",
+    "sol",
+    "--limit",
+    "100"
+   ],
+   "fetched_at": 1790998779,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1090
+  },
+  {
+   "chain": "sol",
+   "endpoint": "trenches",
+   "args": [
+    "market",
+    "trenches",
+    "--chain",
+    "sol",
+    "--type",
+    "new_creation",
+    "near_completion",
+    "completed",
+    "--limit",
+    "30"
+   ],
+   "fetched_at": 1790998800,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1577
+  },
+  {
+   "chain": "robinhood",
+   "endpoint": "trenches",
+   "args": [
+    "market",
+    "trenches",
+    "--chain",
+    "robinhood",
+    "--type",
+    "new_creation",
+    "near_completion",
+    "completed",
+    "--limit",
+    "30"
+   ],
+   "fetched_at": 1790998821,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1241
+  },
+  {
+   "chain": "base",
+   "endpoint": "trenches",
+   "args": [
+    "market",
+    "trenches",
+    "--chain",
+    "base",
+    "--type",
+    "new_creation",
+    "near_completion",
+    "completed",
+    "--limit",
+    "30"
+   ],
+   "fetched_at": 1790998843,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 3496
+  },
+  {
+   "chain": "eth",
+   "endpoint": "trenches",
+   "args": [
+    "market",
+    "trenches",
+    "--chain",
+    "eth",
+    "--type",
+    "new_creation",
+    "near_completion",
+    "completed",
+    "--limit",
+    "30"
+   ],
+   "fetched_at": 1790999028,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1285
+  },
+  {
+   "chain": "sol",
+   "endpoint": "signal",
+   "args": [
+    "market",
+    "signal",
+    "--chain",
+    "sol"
+   ],
+   "fetched_at": 1790999049,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1598
+  },
+  {
+   "chain": "robinhood",
+   "endpoint": "signal",
+   "args": [
+    "market",
+    "signal",
+    "--chain",
+    "robinhood"
+   ],
+   "fetched_at": 1790999071,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1332
+  },
+  {
+   "chain": "sol",
+   "endpoint": "security",
+   "args": [
+    "token",
+    "security",
+    "--chain",
+    "sol",
+    "--address",
+    "23Qh7W7ZdXXVJarqprTjuVKBQH1vpqfU6R3gXY4Zpump"
+   ],
+   "fetched_at": 1790999092,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1170
+  },
+  {
+   "chain": "robinhood",
+   "endpoint": "security",
+   "args": [
+    "token",
+    "security",
+    "--chain",
+    "robinhood",
+    "--address",
+    "0x88ad8ddf1e3898412146a534538d418c6f8a9062"
+   ],
+   "fetched_at": 1790999113,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1259
+  },
+  {
+   "chain": "base",
+   "endpoint": "security",
+   "args": [
+    "token",
+    "security",
+    "--chain",
+    "base",
+    "--address",
+    "0x0c583e4b9b1ebdb09a8e01fa6fd47a825dc1d627"
+   ],
+   "fetched_at": 1790999134,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 934
+  },
+  {
+   "chain": "eth",
+   "endpoint": "security",
+   "args": [
+    "token",
+    "security",
+    "--chain",
+    "eth",
+    "--address",
+    "0xaca92e438df0b2401ff60da7e4337b687a2435da"
+   ],
+   "fetched_at": 1790999155,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1175
+  },
+  {
+   "chain": "robinhood",
+   "endpoint": "trending",
+   "args": [
+    "market",
+    "trending",
+    "--chain",
+    "robinhood",
+    "--interval",
+    "24h",
+    "--limit",
+    "100"
+   ],
+   "fetched_at": 1790999274,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1110
+  },
+  {
+   "chain": "base",
+   "endpoint": "trending",
+   "args": [
+    "market",
+    "trending",
+    "--chain",
+    "base",
+    "--interval",
+    "24h",
+    "--limit",
+    "100"
+   ],
+   "fetched_at": 1790999296,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1005
+  },
+  {
+   "chain": "eth",
+   "endpoint": "trending",
+   "args": [
+    "market",
+    "trending",
+    "--chain",
+    "eth",
+    "--interval",
+    "24h",
+    "--limit",
+    "100"
+   ],
+   "fetched_at": 1790999317,
+   "via": "market_collect.gmgn",
+   "rc": 0,
+   "ms": 1272
+  }
+ ]
+}

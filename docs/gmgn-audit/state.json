@@ -1,0 +1,16 @@
+{
+  "baseline": "done",
+  "raw_collection": "done",
+  "field_matrix": "done",
+  "cross_chain": "pending",
+  "production_mapping": "done",
+  "data_health": "pending",
+  "final_report": "pending",
+  "next_request": null,
+  "updated_at": "2026-10-03T04:35:50Z",
+  "repair": "verified_not_deployed",
+  "capability_map": "updated_accepted_review",
+  "v1_field_integration": "partial_data_chain_pass_pending_deploy_and_ui",
+  "field_semantics": "partial",
+  "daily_token_intelligence": "done_wallet_metrics_not_available"
+}

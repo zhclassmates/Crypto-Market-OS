@@ -1,16 +1,21 @@
 import { useEffect, useState } from "react";
+import { AlertsView, DiscoveryView } from "@/components/discovery-view";
 import { LadderView } from "@/components/ladder-view";
+import { EarlyView } from "@/components/early-view";
 import { MarketView } from "@/components/market-view";
 import { MethodView } from "@/components/method-view";
 import { RadarView } from "@/components/radar-view";
 import { ScoreView } from "@/components/score-view";
 import { StreakView } from "@/components/streak-view";
 
-type Tab = "ladder" | "market" | "score" | "streak" | "radar" | "method" | "watch";
+type Tab = "ladder" | "market" | "early" | "discovery" | "alerts" | "score" | "streak" | "radar" | "method" | "watch";
 
 const TABS: { id: Tab; label: string; hint: string }[] = [
   { id: "ladder", label: "上币阶梯", hint: "走到了哪一级" },
   { id: "market", label: "市场排行", hint: "N日涨跌幅" },
+  { id: "early", label: "早期观察", hint: "EARLY $20k–$50k" },
+  { id: "discovery", label: "爆款发现", hint: "活跃度加速" },
+  { id: "alerts", label: "告警", hint: "条件命中" },
   { id: "score", label: "四列", hint: "当场拉数打分" },
   { id: "streak", label: "日K连涨", hint: "离线算 pattern" },
   { id: "radar", label: "强平雷达", hint: "拥挤与去杠杆" },
@@ -21,6 +26,9 @@ const TABS: { id: Tab; label: string; hint: string }[] = [
 const HASH: Record<Tab, string> = {
   ladder: "#sec-ladder",
   market: "#sec-market",
+  early: "#sec-early",
+  discovery: "#sec-discovery",
+  alerts: "#sec-alerts",
   score: "#sec-score",
   streak: "#sec-streak",
   radar: "#sec-radar",
@@ -32,6 +40,9 @@ function tabFromHash(hash: string): Tab | null {
   const h = hash.replace("#", "");
   if (h === "score" || h === "sec-score") return "score";
   if (h === "market" || h === "sec-market") return "market";
+  if (h === "early" || h === "sec-early") return "early";
+  if (h === "discovery" || h === "sec-discovery") return "discovery";
+  if (h === "alerts" || h === "sec-alerts") return "alerts";
   if (h === "streak" || h === "sec-streak") return "streak";
   if (h === "radar" || h === "sec-radar") return "radar";
   if (h === "method" || h === "sec-method") return "method";
@@ -90,6 +101,9 @@ export function Desk() {
       </header>
       {tab === "ladder" ? <LadderView /> : null}
       {tab === "market" ? <MarketView /> : null}
+      {tab === "early" ? <EarlyView /> : null}
+      {tab === "discovery" ? <DiscoveryView /> : null}
+      {tab === "alerts" ? <AlertsView /> : null}
       {tab === "score" ? <ScoreView /> : null}
       {tab === "streak" ? <StreakView /> : null}
       {tab === "radar" ? <RadarView /> : null}

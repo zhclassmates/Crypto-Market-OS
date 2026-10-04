@@ -166,6 +166,217 @@ class RegistryTest(unittest.TestCase):
             )
 
 
+class Phase4SnapshotMergeTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(self.tmp.name + "/t.sqlite")
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def _trench(self, address="Mint", **overrides):
+        row = {
+            "address": address, "symbol": "M", "price": 1.25,
+            "volume_24h": 123.5, "swaps_24h": 7,
+            "liquidity": 500, "market_cap": 900, "holder_count": 11,
+        }
+        row.update(overrides)
+        return {"new_creation": [row], "near_completion": [], "completed": []}
+
+    def _signal(self, address="Mint", **cur):
+        current = {"liquidity": 600, "holder_count": 12, "top_10_holder_rate": 0.2}
+        current.update(cur)
+        return [{
+            "token_address": address, "signal_type": 7, "market_cap": 950,
+            "data": {"symbol": "M", "price": 999, "volume_24h": 0, "swaps_24h": 0},
+            "cur_data": current,
+        }]
+
+    def test_trenches_then_signal_preserves_unavailable_fields(self):
+        lanes.apply_trench_payload(self.con, "sol", self._trench(), 100)
+        lanes.apply_signal_items(self.con, "sol", self._signal(), 101)
+        row = self.con.execute("SELECT * FROM token_snapshot WHERE address='Mint'").fetchone()
+        self.assertEqual(row["price"], "1.25")
+        self.assertEqual(row["volume_24h"], "123.5")
+        self.assertEqual(row["swaps"], 7)
+        self.assertEqual(row["holders"], 12)
+        self.assertEqual(row["volume_24h_source"], "trenches")
+        self.assertEqual(row["holders_source"], "signal")
+
+    def test_signal_then_trenches_preserves_signal_only_field(self):
+        lanes.apply_signal_items(self.con, "sol", self._signal(), 100)
+        lanes.apply_trench_payload(self.con, "sol", self._trench(), 101)
+        row = self.con.execute("SELECT * FROM token_snapshot WHERE address='Mint'").fetchone()
+        self.assertEqual(row["top10_holder_rate"], "0.2")
+        self.assertEqual(row["price"], "1.25")
+        self.assertEqual(row["volume_24h"], "123.5")
+        self.assertEqual(row["swaps"], 7)
+
+    def test_zero_is_saved_and_missing_is_not_zero(self):
+        lanes.apply_trench_payload(
+            self.con, "base", self._trench(volume_24h=0, swaps_24h=0, holder_count=0), 100,
+        )
+        row = self.con.execute("SELECT volume_24h, swaps, holders FROM token_snapshot").fetchone()
+        self.assertEqual(row["volume_24h"], "0")
+        self.assertEqual(row["swaps"], 0)
+        self.assertEqual(row["holders"], 0)
+        lanes.write_gmgn_rows(self.con, "base", [{"address": "Missing", "symbol": "X"}], 101, source="trenches")
+        missing = self.con.execute(
+            "SELECT volume_24h, swaps, holders FROM token_snapshot WHERE address='Missing'"
+        ).fetchone()
+        self.assertIsNone(missing["volume_24h"])
+        self.assertIsNone(missing["swaps"])
+        self.assertIsNone(missing["holders"])
+
+    def test_explicit_null_clears_owned_field_but_absent_preserves(self):
+        lanes.write_gmgn_rows(self.con, "sol", [{"address": "Mint", "price": 1}], 100, source="trending")
+        lanes.write_gmgn_rows(self.con, "sol", [{"address": "Mint"}], 101, source="trending")
+        self.assertEqual(self.con.execute("SELECT price FROM token_snapshot").fetchone()[0], "1")
+        lanes.write_gmgn_rows(self.con, "sol", [{"address": "Mint", "price": None}], 102, source="trending")
+        self.assertIsNone(self.con.execute("SELECT price FROM token_snapshot").fetchone()[0])
+
+    def test_trench_schema_variants_use_only_direct_24h_fields(self):
+        for i, chain in enumerate(("sol", "robinhood", "base", "eth")):
+            for j, bucket in enumerate(("new_creation", "near_completion", "completed")):
+                address = f"{chain}-{bucket}"
+                payload = {"new_creation": [], "near_completion": [], "completed": []}
+                payload[bucket] = [{
+                    "address": address, "volume_24h": i * 10 + j,
+                    "swaps_24h": i + j, "liquidity": 999999,
+                    "fresh_wallet_rate": 0.99, "new_wallet_volume": 123,
+                }]
+                lanes.apply_trench_payload(self.con, chain, payload, 200 + i * 10 + j)
+                row = self.con.execute(
+                    "SELECT volume_24h, swaps FROM token_snapshot WHERE chain=? AND address=?",
+                    (chain, address),
+                ).fetchone()
+                self.assertEqual(row["volume_24h"], str(i * 10 + j))
+                self.assertEqual(row["swaps"], i + j)
+
+    def test_security_nullable_fields_and_raw_semantics(self):
+        lanes.write_gmgn_rows(self.con, "sol", [{"address": "Mint"}], 100, source="trending")
+        lanes.write_security_snapshot(self.con, "sol", "Mint", {
+            "is_honeypot": False,
+            "is_blacklist": None,
+            "honeypot": 0,
+            "top_10_holder_rate": "0.088",
+        }, 110)
+        row = self.con.execute("SELECT * FROM token_snapshot WHERE address='Mint'").fetchone()
+        self.assertEqual(row["security_is_honeypot"], 0)
+        self.assertIsNone(row["security_is_blacklist"])
+        self.assertEqual(row["security_top10_holder_rate"], "0.088")
+        raw = __import__("json").loads(row["security_json"])
+        self.assertIsNone(raw["is_blacklist"])
+        self.assertEqual(raw["honeypot"], 0)
+
+
+class V1FieldIntegrationTest(unittest.TestCase):
+    """V1 字段：0 是合法值，缺 key 不覆盖，endpoint 不提供的字段保持 NULL。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(self.tmp.name + "/t.sqlite")
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def _row(self, address="Mint"):
+        return self.con.execute("SELECT * FROM token_snapshot WHERE address=?", (address,)).fetchone()
+
+    def test_trending_activity_fields(self):
+        lanes.write_gmgn_rows(self.con, "sol", [{
+            "address": "Mint", "swaps": 10, "buys": 6, "sells": 4,
+            "price_change_percent1h": -3.5, "is_wash_trading": False,
+        }], 100, source="trending")
+        row = self._row()
+        self.assertEqual((row["swaps"], row["buys_24h"], row["sells_24h"]), (10, 6, 4))
+        self.assertEqual(row["pc_1h"], "-3.5")
+        self.assertEqual(row["is_wash_trading"], 0)
+        self.assertEqual(row["buys_24h_source"], "trending")
+        self.assertEqual(row["pc_1h_updated_at"], 100)
+
+    def test_hot_zero_is_value_and_true_flag(self):
+        lanes.apply_hot_items(self.con, "eth", [{
+            "address": "Mint", "swaps": 0, "buys": 0, "sells": 0,
+            "price_change_percent1h": 0, "is_wash_trading": True,
+        }], 100)
+        row = self._row()
+        self.assertEqual((row["swaps"], row["buys_24h"], row["sells_24h"]), (0, 0, 0))
+        self.assertEqual(row["pc_1h"], "0")
+        self.assertEqual(row["is_wash_trading"], 1)
+
+    def test_trench_suffix_fields_and_no_pc_1h(self):
+        payload = {"new_creation": [{
+            "address": "Mint", "swaps_24h": 5, "buys_24h": 3, "sells_24h": 2,
+            "volume_24h": 7.5, "is_wash_trading": False,
+        }], "near_completion": [], "completed": []}
+        lanes.apply_trench_payload(self.con, "base", payload, 100)
+        row = self._row()
+        self.assertEqual((row["swaps"], row["buys_24h"], row["sells_24h"]), (5, 3, 2))
+        self.assertEqual(row["volume_24h"], "7.5")
+        self.assertIsNone(row["pc_1h"])  # Trenches 不提供 1h 涨跌
+        self.assertIsNone(row["pc_1h_source"])
+
+    def test_signal_does_not_touch_activity_and_keeps_trigger(self):
+        lanes.write_gmgn_rows(self.con, "sol", [{
+            "address": "Mint", "swaps": 9, "buys": 5, "sells": 4, "price_change_percent1h": 2,
+        }], 100, source="trending")
+        lanes.apply_signal_items(self.con, "sol", [{
+            "token_address": "Mint", "signal_type": 7, "market_cap": 50,
+            "trigger_at": 1790984873, "trigger_mc": 2575.5,
+            "data": {"swaps_24h": 0, "buys_24h": 0, "sells_24h": 0, "volume_24h": 0},
+            "cur_data": {"liquidity": 1, "holder_count": 2, "top_10_holder_rate": 0.1},
+        }], 101)
+        row = self._row()
+        self.assertEqual((row["swaps"], row["buys_24h"], row["sells_24h"]), (9, 5, 4))
+        self.assertEqual(row["pc_1h"], "2")
+        meta = __import__("json").loads(self.con.execute(
+            "SELECT metadata_json FROM discovery_event WHERE source='signal'"
+        ).fetchone()[0])
+        self.assertEqual(meta["trigger_at"], 1790984873)
+        self.assertEqual(meta["trigger_mc"], 2575.5)
+        self.assertEqual(meta["source_variant"], "7")
+
+    def test_missing_keys_stay_unobserved(self):
+        lanes.write_gmgn_rows(self.con, "sol", [{"address": "Mint"}], 100, source="trending")
+        row = self._row()
+        for col in ("swaps", "buys_24h", "sells_24h", "pc_1h", "is_wash_trading", "buys_24h_source"):
+            self.assertIsNone(row[col], col)
+
+    def test_non_boolean_wash_flag_is_unknown(self):
+        lanes.write_gmgn_rows(self.con, "sol", [{"address": "Mint", "is_wash_trading": "yes"}], 100)
+        self.assertIsNone(self._row()["is_wash_trading"])
+
+    def test_event_metadata_keeps_activity_history(self):
+        lanes.write_gmgn_rows(self.con, "sol", [{
+            "address": "Mint", "rank": 3, "volume": 100, "swaps": 0, "buys": 0, "sells": 0,
+            "price_change_percent1h": 1.5,
+        }], 100, source="trending")
+        e = self.con.execute("SELECT rank, metadata_json FROM discovery_event").fetchone()
+        meta = __import__("json").loads(e["metadata_json"])
+        self.assertEqual(e["rank"], 3)
+        self.assertEqual((meta["volume"], meta["swaps"], meta["buys"], meta["sells"]), (100, 0, 0, 0))
+        self.assertEqual(meta["price_change_percent1h"], 1.5)
+
+    def test_security_v1_fields(self):
+        lanes.write_gmgn_rows(self.con, "sol", [{"address": "Mint"}], 100)
+        lanes.write_security_snapshot(self.con, "sol", "Mint", {
+            "is_honeypot": None, "renounced_mint": True,
+            "renounced_freeze_account": False, "sell_tax": "0",
+        }, 110)
+        row = self._row()
+        self.assertIsNone(row["security_is_honeypot"])  # 明确 null = 未评估，不是安全
+        self.assertEqual(row["security_renounced_mint"], 1)
+        self.assertEqual(row["security_renounced_freeze_account"], 0)
+        self.assertEqual(row["security_sell_tax"], "0")
+        lanes.write_security_snapshot(self.con, "sol", "Mint", {"is_honeypot": False}, 120)
+        row = self._row()
+        self.assertEqual(row["security_is_honeypot"], 0)
+        self.assertIsNone(row["security_sell_tax"])  # 本次响应没有该 key
+
+
 class LiquidityObservationTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -251,6 +462,78 @@ class LiquidityObservationTest(unittest.TestCase):
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM token_candle").fetchone()[0], 1)
 
 
+class LiquidityTierTest(unittest.TestCase):
+    """EARLY 只观察，不进日 K 队列；一旦观测到 >= 50k 自动成为 MAIN。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(self.tmp.name + "/t.sqlite")
+        self.day = 1_700_000_000 - (1_700_000_000 % 86400)
+        self.now = self.day + 10 * 3600
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def _see(self, address, liquidity, at):
+        lanes.write_gmgn_rows(self.con, "sol", [{
+            "address": address, "liquidity": liquidity, "price": 1, "symbol": address,
+        }], at, source="trending", source_variant="24h")
+
+    def _tier(self, address):
+        row = self.con.execute(
+            f"""SELECT {R.TIER_SQL} FROM token_registry r
+                LEFT JOIN token_snapshot s ON s.chain=r.chain AND s.address=r.address
+                WHERE r.address=?""",
+            (address,),
+        ).fetchone()
+        return row[0]
+
+    def test_tier_bands(self):
+        self._see("Ign", 5_000, self.now)
+        self._see("Zero", 0, self.now)
+        self._see("Early", 20_000, self.now)
+        self._see("Near", 49_999, self.now)
+        self._see("Main", 50_000, self.now)
+        self.assertEqual(self._tier("Ign"), R.TIER_IGNORE)
+        self.assertEqual(self._tier("Zero"), R.TIER_IGNORE)
+        self.assertEqual(self._tier("Early"), R.TIER_EARLY)
+        self.assertEqual(self._tier("Near"), R.TIER_EARLY)
+        self.assertEqual(self._tier("Main"), R.TIER_MAIN)
+        self.assertEqual(R.tier_counts(self.con), {"MAIN": 1, "EARLY": 2, "IGNORE": 2})
+        self.assertEqual(R.liquidity_tier(None, 49_999), R.TIER_EARLY)
+        self.assertEqual(R.liquidity_tier(None, None), R.TIER_IGNORE)
+
+    def test_early_is_not_queued_for_kline(self):
+        self._see("Early", 45_000, self.now)
+        self.assertEqual(R.pick_kline_repair(self.con, "sol", self.now, 8), [])
+        pending = self.con.execute(
+            """SELECT COUNT(*) FROM token_registry
+               WHERE first_liquidity_50k_at IS NOT NULL AND kline_backfilled_at IS NULL"""
+        ).fetchone()[0]
+        self.assertEqual(pending, 0)
+
+    def test_early_upgrades_to_main_on_next_observation(self):
+        self._see("Early", 45_000, self.now)
+        self.assertEqual(self._tier("Early"), R.TIER_EARLY)
+        self._see("Early", 52_000, self.now + 600)
+        row = self.con.execute("SELECT * FROM token_registry WHERE address='Early'").fetchone()
+        self.assertEqual(self._tier("Early"), R.TIER_MAIN)
+        self.assertEqual(row["first_liquidity_50k_at"], self.now + 600)
+        self.assertEqual(row["liquidity_50k_observation_type"], R.OBS_CROSSING)
+        self.assertIn("Early", R.pick_kline_repair(self.con, "sol", self.now + 600, 8))
+        # 同一实体：EARLY 期间的 event 保留，不生成第二个 token。
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM token_registry").fetchone()[0], 1)
+        self.assertEqual(
+            self.con.execute("SELECT COUNT(*) FROM discovery_event WHERE address='Early'").fetchone()[0], 2,
+        )
+
+    def test_main_stays_main_after_liquidity_drops(self):
+        self._see("Was", 80_000, self.now)
+        self._see("Was", 30_000, self.now + 600)
+        self.assertEqual(self._tier("Was"), R.TIER_MAIN)
+
+
 class KlineAndMetricsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -315,6 +598,47 @@ class KlineAndMetricsTest(unittest.TestCase):
         self.assertAlmostEqual(r2, 6 / 4 - 1)
         self.assertAlmostEqual(r3, 6 / 3 - 1)
         self.assertAlmostEqual(r5, 6 / 1 - 1)
+
+    def test_daily_metrics_refreshes_at_utc_boundary_and_after_finalize(self):
+        day = 1_700_006_400 - (1_700_006_400 % 86400)
+        before_midnight = day + 4 * 86400 - 1
+        midnight = day + 4 * 86400
+        after_midnight = midnight + 60
+        R.ingest_discovery(self.con, "sol", "UtcMint", "trending", day, liquidity=60_000)
+        R.upsert_snapshot_numbers(self.con, "sol", "UtcMint", before_midnight, 1, 1, 60_000, 1, 1)
+        R.write_daily_candles(self.con, "sol", "UtcMint", [
+            {"time": day + i * 86400, "close": i + 1, "high": i + 1}
+            for i in range(4)
+        ], before_midnight)
+        self.assertEqual(R.refresh_daily_metrics_for_utc_day(self.con, before_midnight), 1)
+        at_2359 = self.con.execute(
+            "SELECT * FROM daily_metrics WHERE address='UtcMint'"
+        ).fetchone()
+        self.assertTrue(R.daily_metrics_fresh(at_2359["calculated_at"], before_midnight))
+        self.assertIsNotNone(at_2359["return_2d"])
+
+        self.assertEqual(R.refresh_daily_metrics_for_utc_day(self.con, midnight), 1)
+        at_0000 = self.con.execute(
+            "SELECT * FROM daily_metrics WHERE address='UtcMint'"
+        ).fetchone()
+        self.assertTrue(R.daily_metrics_fresh(at_0000["calculated_at"], midnight))
+        self.assertIsNone(at_0000["return_2d"])
+        self.assertIsNone(at_0000["streak"])
+        self.assertEqual(R.refresh_daily_metrics_for_utc_day(self.con, after_midnight), 0)
+
+        R.write_daily_candles(self.con, "sol", "UtcMint", [
+            {"time": day + 3 * 86400, "close": 4, "high": 4}
+        ], after_midnight)
+        R.refresh_metrics(self.con, "sol", "UtcMint", after_midnight)
+        finalized = self.con.execute(
+            "SELECT * FROM daily_metrics WHERE address='UtcMint'"
+        ).fetchone()
+        self.assertIsNotNone(finalized["return_2d"])
+        self.assertEqual(finalized["streak"], 3)
+
+        replay = R.refresh_metrics(self.con, "sol", "UtcMint", before_midnight)
+        self.assertIsNotNone(replay["return_2d"])
+        self.assertEqual(replay["streak"], 2)
 
     def test_gap_return_is_null_not_zero(self):
         closed = [(0, 10.0, 10.0), (86400, 12.0, 12.0), (86400 * 3, 20.0, 20.0)]

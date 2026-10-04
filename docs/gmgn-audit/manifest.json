@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-02T23:43:13Z",
+  "baseline": {
+    "git_head": "5301eb6403cc83b4bd5ef223349aaf0c19ac2311",
+    "gmgn_cli_version": "1.6.6",
+    "production_code_files": [
+      "rh_v2/market_collect.py",
+      "rh_v2/market_lanes.py",
+      "rh_v2/market_health.py",
+      "rh_v2/kline_collect.py"
+    ],
+    "production_sqlite_sha256": {
+      "rh_v2/market.sqlite": "2d6cd787182439bac48b55153639ad2637f239be49625eec5f747e2034691ae9",
+      "rh_v2/kline.sqlite": "bd311fbb1356835779e6dc5f454e88b5f8c5441091a094f438fcdf9e44d12847",
+      "rh_v2/rhv2.sqlite": "9c4890f1a962e6600b9d265220f9395e5b0d744eef7e6e20250fd1bd357edbfc"
+    }
+  },
+  "chains": [
+    {"production_name": "sol", "cli_chain": "sol"},
+    {"production_name": "robinhood", "cli_chain": "robinhood"},
+    {"production_name": "base", "cli_chain": "base"},
+    {"production_name": "eth", "cli_chain": "eth"}
+  ],
+  "endpoints": [
+    {
+      "id": "market-trending",
+      "production_command": "gmgn-cli market trending --chain <chain> --interval 24h --limit 100 --raw",
+      "chains": ["sol", "robinhood", "base", "eth"]
+    },
+    {
+      "id": "market-hot-searches",
+      "production_command": "gmgn-cli market hot-searches --chain <chain> --limit 100 --raw",
+      "chains": ["sol", "robinhood", "base", "eth"]
+    },
+    {
+      "id": "market-trenches",
+      "production_command": "gmgn-cli market trenches --chain <chain> --type new_creation near_completion completed --limit 30 --raw",
+      "chains": ["sol", "robinhood", "base", "eth"]
+    },
+    {
+      "id": "market-signal",
+      "production_command": "gmgn-cli market signal --chain <chain> --raw",
+      "chains": ["sol", "robinhood"],
+      "not_called_by_production": {"base": "unsupported", "eth": "unsupported"}
+    },
+    {
+      "id": "market-kline",
+      "production_command": "gmgn-cli market kline --chain <chain> --address <production-address> --resolution 1d --from <now-100d> --to <now> --raw",
+      "chains": ["sol", "robinhood", "base", "eth"]
+    },
+    {
+      "id": "token-security",
+      "production_command": "gmgn-cli token security --chain <chain> --address <production-address> --raw",
+      "chains": ["sol", "robinhood", "base", "eth"]
+    }
+  ],
+  "checked_but_not_used_by_production": [
+    "market search",
+    "token info",
+    "token pool",
+    "token holders",
+    "token traders",
+    "track endpoints"
+  ],
+  "test_objects": {
+    "sol": {"address": "23Qh7W7ZdXXVJarqprTjuVKBQH1vpqfU6R3gXY4Zpump", "symbol": "SATCHI", "source": "read-only production token_snapshot, highest liquidity"},
+    "robinhood": {"address": "0x88ad8ddf1e3898412146a534538d418c6f8a9062", "symbol": "STANDARD", "source": "read-only production token_snapshot, highest liquidity"},
+    "base": {"address": "0x0c583e4b9b1ebdb09a8e01fa6fd47a825dc1d627", "symbol": "BTC", "source": "read-only production token_snapshot, highest liquidity"},
+    "eth": {"address": "0xaca92e438df0b2401ff60da7e4337b687a2435da", "symbol": "mUSD", "source": "read-only production token_snapshot, highest liquidity"}
+  },
+  "request_plan": [
+    {"chain": "sol", "endpoint": "market-trending", "state": "done"},
+    {"chain": "sol", "endpoint": "market-hot-searches", "state": "done"},
+    {"chain": "sol", "endpoint": "market-trenches", "state": "done"},
+    {"chain": "sol", "endpoint": "market-signal", "state": "done"},
+    {"chain": "sol", "endpoint": "market-kline", "state": "done"},
+    {"chain": "sol", "endpoint": "token-security", "state": "done"},
+    {"chain": "robinhood", "endpoint": "market-trending", "state": "done"},
+    {"chain": "robinhood", "endpoint": "market-hot-searches", "state": "done"},
+    {"chain": "robinhood", "endpoint": "market-trenches", "state": "done"},
+    {"chain": "robinhood", "endpoint": "market-signal", "state": "done"},
+    {"chain": "robinhood", "endpoint": "market-kline", "state": "done"},
+    {"chain": "robinhood", "endpoint": "token-security", "state": "done"},
+    {"chain": "base", "endpoint": "market-trending", "state": "done"},
+    {"chain": "base", "endpoint": "market-hot-searches", "state": "done"},
+    {"chain": "base", "endpoint": "market-trenches", "state": "done"},
+    {"chain": "base", "endpoint": "market-kline", "state": "done"},
+    {"chain": "base", "endpoint": "token-security", "state": "done"},
+    {"chain": "eth", "endpoint": "market-trending", "state": "done"},
+    {"chain": "eth", "endpoint": "market-hot-searches", "state": "done"},
+    {"chain": "eth", "endpoint": "market-trenches", "state": "done"},
+    {"chain": "eth", "endpoint": "market-kline", "state": "done"},
+    {"chain": "eth", "endpoint": "token-security", "state": "done"}
+  ]
+}

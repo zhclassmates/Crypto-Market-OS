@@ -1,0 +1,4 @@
+paused_at 1790955374 2026-10-02 15:36:14 UTC
+services: com.market.collector (pid 518 python / 545 caffeinate, market_run.py loop), com.kline.collector (StartInterval 14400, idle)
+method: launchctl bootout gui/501/<label>; plist files untouched
+not paused (no GMGN usage): com.rhv2.collector, com.cryptoos.market-structure
