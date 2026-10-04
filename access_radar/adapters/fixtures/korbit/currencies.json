@@ -1,0 +1,280 @@
+{
+ "success": true,
+ "data": [
+  {
+   "name": "krw",
+   "fullName": "Won",
+   "withdrawalMaxAmountPerRequest": "5000000000",
+   "depositStatus": "launched",
+   "withdrawalStatus": "launched",
+   "withdrawalTxFee": "1000",
+   "withdrawalMinAmount": "1000"
+  },
+  {
+   "name": "btc",
+   "fullName": "BTC",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "BTC",
+   "networkList": [
+    {
+     "name": "BTC",
+     "fullName": "Bitcoin",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  },
+  {
+   "name": "eth",
+   "fullName": "ETH",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "ETH",
+   "networkList": [
+    {
+     "name": "ETH",
+     "fullName": "Ethereum",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    },
+    {
+     "name": "BASE",
+     "fullName": "BASE",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  },
+  {
+   "name": "xrp",
+   "fullName": "XRP",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "XRP",
+   "networkList": [
+    {
+     "name": "XRP",
+     "fullName": "Ripple",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  },
+  {
+   "name": "sol",
+   "fullName": "SOL",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "SOL",
+   "networkList": [
+    {
+     "name": "SOL",
+     "fullName": "Solana",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  },
+  {
+   "name": "doge",
+   "fullName": "DOGE",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "DOGE",
+   "networkList": [
+    {
+     "name": "DOGE",
+     "fullName": "Dogecoin",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  },
+  {
+   "name": "ada",
+   "fullName": "ADA",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "ADA",
+   "networkList": [
+    {
+     "name": "ADA",
+     "fullName": "Cardano",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  },
+  {
+   "name": "trx",
+   "fullName": "TRX",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "TRX",
+   "networkList": [
+    {
+     "name": "TRX",
+     "fullName": "Tron",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  },
+  {
+   "name": "link",
+   "fullName": "LINK",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "ETH",
+   "networkList": [
+    {
+     "name": "ETH",
+     "fullName": "Ethereum",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/",
+     "contractAddress": "0x514910771AF9Ca656af840dff83E8264EcF986CA"
+    }
+   ]
+  },
+  {
+   "name": "avax",
+   "fullName": "AVAX",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "AVAX",
+   "networkList": [
+    {
+     "name": "AVAX",
+     "fullName": "Avalanche C-Chain",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  },
+  {
+   "name": "dot",
+   "fullName": "DOT",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "DOT",
+   "networkList": [
+    {
+     "name": "DOT",
+     "fullName": "Polkadot",
+     "depositStatus": "stopped",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  },
+  {
+   "name": "usdt",
+   "fullName": "USDT",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "TRX",
+   "networkList": [
+    {
+     "name": "TRX",
+     "fullName": "Tron",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    },
+    {
+     "name": "ETH",
+     "fullName": "Ethereum",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/",
+     "contractAddress": "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+    }
+   ]
+  },
+  {
+   "name": "sui",
+   "fullName": "SUI",
+   "withdrawalMaxAmountPerRequest": "100",
+   "defaultNetwork": "SUI",
+   "networkList": [
+    {
+     "name": "SUI",
+     "fullName": "Sui",
+     "depositStatus": "launched",
+     "withdrawalStatus": "launched",
+     "confirmationCount": 3,
+     "withdrawalTxFee": "0.001",
+     "withdrawalMinAmount": "0.0001",
+     "withdrawalPrecision": 8,
+     "hasSecondaryAddr": false,
+     "addressExplorerUrl": "https://example/address/"
+    }
+   ]
+  }
+ ]
+}

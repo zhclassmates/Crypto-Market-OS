@@ -1,0 +1,22 @@
+{
+ "success": true,
+ "data": [
+  {
+   "title": "[거래지원] 신규 거래지원 안내 - 수이(SUI)",
+   "createdAt": 1790000000000,
+   "updatedAt": 1790000000000,
+   "url": "https://digitalx.miraeasset.com/notice/detail/?noticeId=4Oy9q6ALiM7jABzMt32ul5"
+  },
+  {
+   "title": "[거래지원 종료] 폴카닷(DOT) 거래지원 종료 안내 (10/20 15:00)",
+   "createdAt": 1789990000000,
+   "url": "https://digitalx.miraeasset.com/notice/detail/?noticeId=7Abc9q6ALiM7jABzMt32xx"
+  },
+  {
+   "title": "Open API 서버 점검 안내",
+   "createdAt": 1789980000000,
+   "updatedAt": null,
+   "url": "https://digitalx.miraeasset.com/notice/detail/?noticeId=9Zzz9q6ALiM7jABzMt32yy"
+  }
+ ]
+}
