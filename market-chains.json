@@ -4,31 +4,36 @@
       "id": "sol",
       "label": "Solana",
       "dexscreener": "solana",
-      "signal": true
+      "signal": true,
+      "access": ["solana", "sol"]
     },
     {
       "id": "robinhood",
       "label": "Robinhood",
       "dexscreener": "robinhood",
-      "signal": true
+      "signal": true,
+      "access": ["robinhood"]
     },
     {
       "id": "base",
       "label": "Base",
       "dexscreener": "base",
-      "signal": false
+      "signal": false,
+      "access": ["base"]
     },
     {
       "id": "eth",
       "label": "Ethereum",
       "dexscreener": "ethereum",
-      "signal": false
+      "signal": false,
+      "access": ["ethereum", "eth"]
     },
     {
       "id": "bsc",
       "label": "BSC",
       "dexscreener": "bsc",
-      "signal": true
+      "signal": true,
+      "access": ["bsc", "bnb"]
     }
   ]
 }
