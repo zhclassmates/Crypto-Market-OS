@@ -49,14 +49,14 @@ function shortAddr(a: string): string {
 function MarkCell({ mark }: { mark: string }) {
   if (mark === "+")
     return (
-      <span className="inline-flex items-center gap-1 text-moss">
+      <span className="inline-flex items-center gap-1 text-positive">
         <ArrowUp className="size-3" />
         涨
       </span>
     );
   if (mark === "-")
     return (
-      <span className="inline-flex items-center gap-1 text-clay">
+      <span className="inline-flex items-center gap-1 text-negative">
         <ArrowDown className="size-3" />
         跌
       </span>
@@ -79,9 +79,9 @@ function PatternBar({ pattern }: { pattern: string }) {
           className={
             "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-xs font-mono " +
             (ch === "+"
-              ? "bg-moss/15 text-moss border border-moss/30"
+              ? "bg-positive/15 text-positive border border-positive/30"
               : ch === "-"
-                ? "bg-clay/15 text-clay border border-clay/30"
+                ? "bg-negative/15 text-negative border border-negative/30"
                 : "bg-surface-2 text-muted border border-line")
           }
         >
@@ -119,19 +119,19 @@ function TokenDetail({ token, days }: { token: TokenStreak; days: number }) {
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-lg border border-line bg-surface p-3 text-center">
           <p className="font-mono text-xs text-muted">连涨</p>
-          <p className={`mt-1 text-2xl font-mono font-medium ${(token.upDays ?? 0) > 0 ? "text-moss" : "text-muted"}`}>
+          <p className={`mt-1 text-2xl font-mono font-medium ${(token.upDays ?? 0) > 0 ? "text-positive" : "text-muted"}`}>
             {token.upDays == null ? "—" : token.upDays}
           </p>
         </div>
         <div className="rounded-lg border border-line bg-surface p-3 text-center">
           <p className="font-mono text-xs text-muted">连跌</p>
-          <p className={`mt-1 text-2xl font-mono font-medium ${run("-") > 0 ? "text-clay" : "text-muted"}`}>
+          <p className={`mt-1 text-2xl font-mono font-medium ${run("-") > 0 ? "text-negative" : "text-muted"}`}>
             {run("-")}
           </p>
         </div>
         <div className="rounded-lg border border-line bg-surface p-3 text-center">
           <p className="font-mono text-xs text-muted">持平</p>
-          <p className={`mt-1 text-2xl font-mono font-medium ${run("=") > 0 ? "text-brass" : "text-muted"}`}>
+          <p className={`mt-1 text-2xl font-mono font-medium ${run("=") > 0 ? "text-primary" : "text-muted"}`}>
             {run("=")}
           </p>
         </div>
@@ -172,7 +172,7 @@ function TokenDetail({ token, days }: { token: TokenStreak; days: number }) {
                   </td>
                   <td
                     className={`px-3 py-2 font-mono text-xs text-right ${
-                      mark === "+" ? "text-moss" : mark === "-" ? "text-clay" : "text-muted"
+                      mark === "+" ? "text-positive" : mark === "-" ? "text-negative" : "text-muted"
                     }`}
                   >
                     {pct > 0 ? "+" : ""}
@@ -263,7 +263,7 @@ function JsonMode() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <FileJson className="size-4 text-brass" />
+          <FileJson className="size-4 text-primary" />
           <span className="text-sm font-medium">粘贴 JSON（GMGN / GeckoTerminal）</span>
         </div>
         <button
@@ -279,7 +279,7 @@ function JsonMode() {
         value={jsonText}
         onChange={(e) => setJsonText(e.target.value)}
         rows={10}
-        className="rounded-lg border border-line bg-bg p-3 font-mono text-xs leading-relaxed text-fg focus:border-brass focus:outline-none"
+        className="rounded-lg border border-line bg-bg p-3 font-mono text-xs leading-relaxed text-fg focus:border-primary focus:outline-none"
         spellCheck={false}
       />
       <label className="flex items-center gap-2 text-sm text-muted">
@@ -287,22 +287,22 @@ function JsonMode() {
           type="checkbox"
           checked={keepForming}
           onChange={(e) => setKeepForming(e.target.checked)}
-          className="size-4 accent-brass"
+          className="size-4 accent-primary"
         />
         保留未收盘的今日 K
       </label>
-      {error && <p className="text-sm text-clay">{error}</p>}
+      {error && <p className="text-sm text-negative">{error}</p>}
       {result && (
         <div className="grid grid-cols-4 gap-3">
           <div className="rounded-lg border border-line bg-surface p-3 text-center">
             <p className="font-mono text-xs text-muted">连涨</p>
-            <p className={`mt-1 text-2xl font-mono ${(result.upDays ?? 0) > 0 ? "text-moss" : "text-muted"}`}>
+            <p className={`mt-1 text-2xl font-mono ${(result.upDays ?? 0) > 0 ? "text-positive" : "text-muted"}`}>
               {result.upDays == null ? "—" : result.upDays}
             </p>
           </div>
           <div className="rounded-lg border border-line bg-surface p-3 text-center">
             <p className="font-mono text-xs text-muted">连跌</p>
-            <p className={`mt-1 text-2xl font-mono ${result.downDays > 0 ? "text-clay" : "text-muted"}`}>
+            <p className={`mt-1 text-2xl font-mono ${result.downDays > 0 ? "text-negative" : "text-muted"}`}>
               {result.downDays}
             </p>
           </div>
@@ -350,7 +350,7 @@ export function StreakView() {
           onClick={() => setMode("live")}
           className={
             "inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm " +
-            (mode === "live" ? "border-brass text-fg" : "border-line text-muted")
+            (mode === "live" ? "border-primary text-fg" : "border-line text-muted")
           }
         >
           <Database className="size-4" />
@@ -361,7 +361,7 @@ export function StreakView() {
           onClick={() => setMode("json")}
           className={
             "inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm " +
-            (mode === "json" ? "border-brass text-fg" : "border-line text-muted")
+            (mode === "json" ? "border-primary text-fg" : "border-line text-muted")
           }
         >
           <FileJson className="size-4" />
@@ -394,7 +394,7 @@ export function StreakView() {
             </button>
           </div>
 
-          {data?.error && <p className="rounded-lg border border-clay/30 bg-clay/10 p-3 text-sm text-clay">{data.error}</p>}
+          {data?.error && <p className="rounded-lg border border-negative/30 bg-negative/10 p-3 text-sm text-negative">{data.error}</p>}
 
           {data?.ok && data.tokens.length > 0 ? (
             <>
@@ -431,12 +431,12 @@ export function StreakView() {
                           <td className="px-4 py-2 font-mono text-xs text-muted">{t.chain}</td>
                           <td className="whitespace-nowrap px-4 py-2 font-mono text-xs text-right">{t.latestClose}</td>
                           <td className="px-4 py-2 text-center">
-                            <span className={(t.upDays ?? 0) > 0 ? "font-mono font-medium text-moss" : "font-mono text-muted"}>
+                            <span className={(t.upDays ?? 0) > 0 ? "font-mono font-medium text-positive" : "font-mono text-muted"}>
                               {t.upDays == null ? "—" : t.upDays}
                             </span>
                           </td>
                           <td className="px-4 py-2 text-center">
-                            <span className={t.downDays > 0 ? "font-mono font-medium text-clay" : "font-mono text-muted"}>
+                            <span className={t.downDays > 0 ? "font-mono font-medium text-negative" : "font-mono text-muted"}>
                               {t.downDays}
                             </span>
                           </td>
@@ -472,7 +472,7 @@ export function StreakView() {
                           onClick={() => setDays(d)}
                           className={
                             "rounded-full border px-3 py-1 text-xs " +
-                            (days === d ? "border-brass text-fg" : "border-line text-muted")
+                            (days === d ? "border-primary text-fg" : "border-line text-muted")
                           }
                         >
                           {d} 天
@@ -489,7 +489,7 @@ export function StreakView() {
               <div className="rounded-xl border border-line bg-surface p-8 text-center">
                 <p className="text-muted">暂无日 K 数据</p>
                 <p className="mt-1 text-xs text-muted">
-                  先跑 <code className="font-mono text-brass">python3 rh_v2/market_run.py once</code> 采集全市场日 K
+                  先跑 <code className="font-mono text-primary">python3 rh_v2/market_run.py once</code> 采集全市场日 K
                 </p>
               </div>
             )

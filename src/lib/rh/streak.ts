@@ -44,6 +44,8 @@ export interface DailyBar {
   finalizedAt?: number | null;
   /** 数据源若明确给了 closed/final，优先采信。 */
   sourceClosed?: boolean | null;
+  /** 这一根日K自己的 USD 成交量（GMGN kline `volume`）。null = 源没给 / 不可信，不是 0。 */
+  volumeUsd?: number | null;
 }
 
 export interface ClassifiedBar extends DailyBar {
@@ -155,6 +157,7 @@ export function classifyBars(
       fetchedAt: bar.fetchedAt ?? null,
       finalizedAt: bar.finalizedAt ?? null,
       sourceClosed: bar.sourceClosed ?? null,
+      volumeUsd: bar.volumeUsd ?? null,
       end: barEnd(bar.ts),
       status: barStatus(bar, now),
     };
