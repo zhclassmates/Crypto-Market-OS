@@ -1,10 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { catalog, classifyStatus, type HealthSource } from "@/lib/rh/market-status";
 
-const DB_PATH = join(dirname(fileURLToPath(import.meta.url)), "../../../rh_v2/market.sqlite");
+const DB_PATH = process.env.RH_MARKET_DB || join(process.cwd(), "rh_v2/market.sqlite");
 
 function openDb(): DatabaseSync | null {
   if (!existsSync(DB_PATH)) return null;

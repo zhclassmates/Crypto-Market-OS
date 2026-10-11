@@ -528,8 +528,10 @@ def job_kline(chain):
     M = _gmgn_mod()
     import market_research as R
     now = int(time.time())
+    growth_item = None
 
     def pick(con):
+        nonlocal growth_item
         _remember_seed(con, chain, now)
         repair = R.pick_kline_repair(con, chain, now, R.KLINE_REPAIR_BATCH)
         if repair:
@@ -553,10 +555,11 @@ def job_kline(chain):
             ).fetchone()
             if not have:
                 return [address]
+        # Normal rotation remains independent of the idle supplementation budget.
         cursor = int(db.meta_get(con, "kline_cursor_" + chain, "0") or 0)
         rows = con.execute(
-            "SELECT address FROM token_registry WHERE chain=? ORDER BY address",
-            (chain,),
+            "SELECT address FROM token_registry WHERE chain=? AND COALESCE(kline_retry_after,0)<=? ORDER BY address",
+            (chain, now),
         ).fetchall()
         if not rows:
             rows = con.execute(
@@ -585,7 +588,12 @@ def job_kline(chain):
     for address in addresses:
         try:
             def write(con, addr=address):
-                written = M.upsert_daily_kline(con, chain, addr, now)
+                if growth_item is not None:
+                    import history_growth as growth
+                    result=growth.attempt(con,growth_item,now,growth.fetch_standard)
+                    written=result.get('inserted',0)
+                else:
+                    written = M.upsert_daily_kline(con, chain, addr, now)
                 if written:
                     db.meta_set(con, "last_kline_update_" + chain, str(now))
                     db.meta_set(con, "last_kline_update", str(now))
@@ -595,7 +603,7 @@ def job_kline(chain):
             written_total += written or 0
             if not written:
                 def mark_empty(con, addr=address):
-                    R.schedule_kline_retry(con, chain, addr, now, R.kline_repair_delay(now))
+                    R.schedule_kline_retry(con, chain, addr, now, 86400)
                 with_db(mark_empty)
         except Exception as e:
             last_err = e
@@ -1142,6 +1150,7 @@ def run_loop():
         ).start()
     last_hb = 0
     last_prune = 0
+    last_history = 0
     try:
         while True:
             now = time.time()
@@ -1161,6 +1170,13 @@ def run_loop():
             periods = {(s, c): p for (s, c), p in H.PERIOD.items() if s in GMGN_JOBS}
             picked = sched.pick_gmgn_job(nxt, now, periods, GMGN_PRIORITY)
             if not picked:
+                import history_growth as growth
+                if now-last_history>=60 and growth.idle_allowed(nxt,now,periods):
+                    last_history=now
+                    try:
+                        with_db(lambda con: growth.idle_tick(con,int(now)))
+                    except Exception as error:
+                        print('history_growth:',type(error).__name__,str(error)[:200],flush=True)
                 time.sleep(0.2)
                 continue
             source, chain, period = picked

@@ -1,0 +1,587 @@
+[
+ {
+  "market": "KRW-BTC",
+  "korean_name": "BTC 한글",
+  "english_name": "BTC name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-ETH",
+  "korean_name": "ETH 한글",
+  "english_name": "ETH name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-XRP",
+  "korean_name": "XRP 한글",
+  "english_name": "XRP name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-SOL",
+  "korean_name": "SOL 한글",
+  "english_name": "SOL name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-DOGE",
+  "korean_name": "DOGE 한글",
+  "english_name": "DOGE name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": true,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-ADA",
+  "korean_name": "ADA 한글",
+  "english_name": "ADA name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-TRX",
+  "korean_name": "TRX 한글",
+  "english_name": "TRX name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-LINK",
+  "korean_name": "LINK 한글",
+  "english_name": "LINK name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-AVAX",
+  "korean_name": "AVAX 한글",
+  "english_name": "AVAX name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-DOT",
+  "korean_name": "DOT 한글",
+  "english_name": "DOT name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-SUI",
+  "korean_name": "SUI 한글",
+  "english_name": "SUI name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-APT",
+  "korean_name": "APT 한글",
+  "english_name": "APT name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-ARB",
+  "korean_name": "ARB 한글",
+  "english_name": "ARB name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-OP",
+  "korean_name": "OP 한글",
+  "english_name": "OP name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-NEAR",
+  "korean_name": "NEAR 한글",
+  "english_name": "NEAR name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-IO",
+  "korean_name": "IO 한글",
+  "english_name": "IO name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-OMG",
+  "korean_name": "OMG 한글",
+  "english_name": "OMG name",
+  "market_event": {
+   "warning": true,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-SAND",
+  "korean_name": "SAND 한글",
+  "english_name": "SAND name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-AXS",
+  "korean_name": "AXS 한글",
+  "english_name": "AXS name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "KRW-ZRO",
+  "korean_name": "ZRO 한글",
+  "english_name": "ZRO name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-ETH",
+  "korean_name": "ETH 한글",
+  "english_name": "ETH name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-XRP",
+  "korean_name": "XRP 한글",
+  "english_name": "XRP name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-SOL",
+  "korean_name": "SOL 한글",
+  "english_name": "SOL name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-DOGE",
+  "korean_name": "DOGE 한글",
+  "english_name": "DOGE name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": true,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-ADA",
+  "korean_name": "ADA 한글",
+  "english_name": "ADA name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-TRX",
+  "korean_name": "TRX 한글",
+  "english_name": "TRX name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-LINK",
+  "korean_name": "LINK 한글",
+  "english_name": "LINK name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-AVAX",
+  "korean_name": "AVAX 한글",
+  "english_name": "AVAX name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-DOT",
+  "korean_name": "DOT 한글",
+  "english_name": "DOT name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-SUI",
+  "korean_name": "SUI 한글",
+  "english_name": "SUI name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "BTC-APT",
+  "korean_name": "APT 한글",
+  "english_name": "APT name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "USDT-BTC",
+  "korean_name": "BTC 한글",
+  "english_name": "BTC name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "USDT-ETH",
+  "korean_name": "ETH 한글",
+  "english_name": "ETH name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "USDT-XRP",
+  "korean_name": "XRP 한글",
+  "english_name": "XRP name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "USDT-SOL",
+  "korean_name": "SOL 한글",
+  "english_name": "SOL name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "USDT-DOGE",
+  "korean_name": "DOGE 한글",
+  "english_name": "DOGE name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": true,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "USDT-ADA",
+  "korean_name": "ADA 한글",
+  "english_name": "ADA name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "USDT-TRX",
+  "korean_name": "TRX 한글",
+  "english_name": "TRX name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ },
+ {
+  "market": "USDT-LINK",
+  "korean_name": "LINK 한글",
+  "english_name": "LINK name",
+  "market_event": {
+   "warning": false,
+   "caution": {
+    "PRICE_FLUCTUATIONS": false,
+    "TRADING_VOLUME_SOARING": false,
+    "DEPOSIT_AMOUNT_SOARING": false,
+    "GLOBAL_PRICE_DIFFERENCES": false,
+    "CONCENTRATION_OF_SMALL_ACCOUNTS": false
+   }
+  }
+ }
+]

@@ -10,29 +10,38 @@ export function utcDateKey(ts: number): string {
   return new Date(ts * 1000).toISOString().slice(0, 10);
 }
 
-/** 日期列最多保留最近 15 个自然日；默认视口只露出最近 7 天。 */
-export const MARKET_DATE_HISTORY = 15;
+/** MarketView 只展示以统一 finalized 终点为基准的最近 7 个自然日。 */
+export const MARKET_DATE_HISTORY = 7;
 export const MARKET_DATE_VIEWPORT = 7;
 
-/** UTC 日历窗口：最近 15 个自然日，今天在最右，不生成未来日期。 */
+/** UTC 日历窗口：以传入时间所在的自然日为终点，不生成更晚日期。 */
 export function calendarDateWindow(
-  now: number,
+  windowEndTs: number,
   history = MARKET_DATE_HISTORY,
 ): string[] {
-  const todayStart = Math.floor(now / DAY_SEC) * DAY_SEC;
+  const windowEndStart = Math.floor(windowEndTs / DAY_SEC) * DAY_SEC;
   return Array.from(
     { length: history },
-    (_, index) => utcDateKey(todayStart - (history - 1 - index) * DAY_SEC),
+    (_, index) => utcDateKey(windowEndStart - (history - 1 - index) * DAY_SEC),
   );
 }
 
-/**
- * 默认 7 天视口里的相对位置：今天 = T+3，T0 = 今天 − 3 天。
- * 更早的日期继续往负数走（T-4、T-5 …）。
- */
-export function dateTOffset(date: string, today: string): number {
-  const diff = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${date}T00:00:00Z`)) / (DAY_SEC * 1000));
-  return 3 - diff;
+/** 只接受 API 给出的统一 YYYY-MM-DD 终点；缺失或非法时不猜测本机日期。 */
+export function finalizedDateWindow(windowEnd: string | null | undefined): string[] {
+  if (!windowEnd || !/^\d{4}-\d{2}-\d{2}$/.test(windowEnd)) return [];
+  const windowEndMs = Date.parse(`${windowEnd}T00:00:00Z`);
+  if (!Number.isFinite(windowEndMs)) return [];
+  const windowEndTs = windowEndMs / 1000;
+  if (utcDateKey(windowEndTs) !== windowEnd) return [];
+  return calendarDateWindow(windowEndTs);
+}
+
+/** 统一窗口终点就是 T：窗口七列依次为 T-6 … T0。 */
+export function dateTOffset(date: string, windowEnd: string): number {
+  return Math.round(
+    (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${windowEnd}T00:00:00Z`)) /
+      (DAY_SEC * 1000),
+  );
 }
 
 export function fmtTOffset(offset: number): string {
@@ -46,24 +55,70 @@ export function formatDailyReturn(value: number | null | undefined): string {
   return `${sign}${Math.abs(pct).toFixed(1)}%`;
 }
 
+/**
+ * 同一个 (chain, address, date) 的一格：收益和成交量都取自这一天同一根 FINALIZED 日K。
+ * returnPct 是小数（0.339 = +33.9%），与 dailyReturns[date] 同值；null = 缺，不是 0。
+ */
+export interface DailyHistoryEntry {
+  date: string;
+  returnPct: number | null;
+  volumeUsd: number | null;
+}
+
+/** "" / null / 非数字 / 负数 → null；只有源明确给出的 0 才是 0。 */
+export function parseVolumeUsd(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === "string" && v.trim() === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 /** 展示层日收益：只使用相邻的 FINALIZED UTC 日K。 */
 export function dailyReturnsFromFinalized(
   bars: DailyBar[],
   now: number,
   createdAt: number | null,
-): { dates: string[]; returns: DailyReturnMap } {
+): { dates: string[]; returns: DailyReturnMap; history: Record<string, DailyHistoryEntry> } {
   const finalized = getFinalizedDailyBars(bars, now, createdAt);
   const dates = finalized.map((bar) => utcDateKey(bar.ts));
-  const returns: DailyReturnMap = Object.fromEntries(dates.map((date) => [date, null]));
+  const history: Record<string, DailyHistoryEntry> = {};
 
-  for (let i = 1; i < finalized.length; i++) {
-    const previous = finalized[i - 1]!;
+  for (let i = 0; i < finalized.length; i++) {
     const current = finalized[i]!;
-    if (current.ts - previous.ts !== DAY_SEC || previous.close <= 0) continue;
-    returns[utcDateKey(current.ts)] = current.close / previous.close - 1;
+    const previous = i > 0 ? finalized[i - 1]! : null;
+    const date = utcDateKey(current.ts);
+    const returnPct =
+      previous && current.ts - previous.ts === DAY_SEC && previous.close > 0
+        ? current.close / previous.close - 1
+        : null;
+    history[date] = { date, returnPct, volumeUsd: parseVolumeUsd(current.volumeUsd) };
   }
 
-  return { dates, returns };
+  const returns: DailyReturnMap = Object.fromEntries(
+    dates.map((date) => [date, history[date]!.returnPct]),
+  );
+  return { dates, returns, history };
+}
+
+/** 按统一窗口取格子；该日没有 FINALIZED 日K 时两个值都是 null。 */
+export function dailyHistoryForWindow(
+  history: Record<string, DailyHistoryEntry>,
+  windowDates: readonly string[],
+): DailyHistoryEntry[] {
+  return windowDates.map((date) => history[date] ?? { date, returnPct: null, volumeUsd: null });
+}
+
+/** 紧凑 USD：最多 3 位有效数字。null = 没有可信数据 → —；真实 0 → $0。 */
+export function formatCompactUsd(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value) || value < 0) return "—";
+  if (value === 0) return "$0";
+  if (value < 1) return "<$1";
+  const rounded = Number(value.toPrecision(3));
+  const units: [number, string][] = [[1e9, "B"], [1e6, "M"], [1e3, "K"]];
+  for (const [size, suffix] of units) {
+    if (rounded >= size) return `$${Number((rounded / size).toPrecision(3))}${suffix}`;
+  }
+  return `$${Math.round(rounded)}`;
 }
 
 export function latestFinalizedDates(

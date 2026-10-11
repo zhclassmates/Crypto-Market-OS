@@ -10,7 +10,7 @@ import { MARKET_CHAIN_LABEL, MARKET_CHAIN_TABS } from "@/lib/rh/market-chains";
 type SortKey = "liquidity" | "volume24h" | "createdAt";
 
 const CHAIN_BADGE: Record<string, string> = {
-  sol: "bg-[#9945FF]", robinhood: "bg-[#00C805]", base: "bg-[#0052FF]", eth: "bg-[#627EEA]", bsc: "bg-[#F0B90B]",
+  sol: "bg-chain-sol", robinhood: "bg-chain-robinhood", base: "bg-chain-base", eth: "bg-chain-eth", bsc: "bg-chain-bsc",
 };
 const REFRESH_MS = 60_000;
 const PAGE_ROWS = 100;
@@ -37,7 +37,7 @@ function fmtPct(v: string | null): { text: string; cls: string } {
   const n = v == null || v === "" ? NaN : Number(v);
   if (!Number.isFinite(n)) return { text: "—", cls: "text-muted" };
   const pct = n; // token_snapshot.pc_24h 原样是百分数（rank 接口才 /100）
-  return { text: `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`, cls: pct > 0 ? "text-moss" : pct < 0 ? "text-clay" : "text-muted" };
+  return { text: `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`, cls: pct > 0 ? "text-positive" : pct < 0 ? "text-negative" : "text-muted" };
 }
 
 function liqDelta(t: EarlyToken): { text: string; cls: string; title: string } {
@@ -47,7 +47,7 @@ function liqDelta(t: EarlyToken): { text: string; cls: string; title: string } {
   const d = t.liquidity / t.liquidity24hAgo - 1;
   return {
     text: `${d > 0 ? "+" : ""}${(d * 100).toFixed(0)}%`,
-    cls: d > 0 ? "text-moss" : d < 0 ? "text-clay" : "text-muted",
+    cls: d > 0 ? "text-positive" : d < 0 ? "text-negative" : "text-muted",
     title: `约 24h 前 ${fmtUsd(t.liquidity24hAgo)} → 现在 ${fmtUsd(t.liquidity)}`,
   };
 }
@@ -163,7 +163,7 @@ export function EarlyView() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索 token"
-            className="h-9 w-52 rounded-full border border-line bg-bg pl-9 pr-3 text-sm text-fg focus:border-brass focus:outline-none"
+            className="h-9 w-52 rounded-full border border-line bg-bg pl-9 pr-3 text-sm text-fg focus:border-primary focus:outline-none"
           />
         </div>
         {MARKET_CHAIN_TABS.map((c) => (
@@ -171,7 +171,7 @@ export function EarlyView() {
             key={c}
             type="button"
             onClick={() => setChain(c)}
-            className={"min-h-9 rounded-full border px-3 text-sm " + (chain === c ? "border-brass text-fg" : "border-line text-muted")}
+            className={"min-h-9 rounded-full border px-3 text-sm " + (chain === c ? "border-primary text-fg" : "border-line text-muted")}
           >
             {MARKET_CHAIN_LABEL[c]}
           </button>
@@ -181,7 +181,7 @@ export function EarlyView() {
           {tiers ? (
             <>
               <span>MAIN <span className="text-fg">{tiers.mainTokens.toLocaleString()}</span></span>
-              <span>EARLY <span className="text-brass">{tiers.earlyTokens.toLocaleString()}</span></span>
+              <span>EARLY <span className="text-primary">{tiers.earlyTokens.toLocaleString()}</span></span>
             </>
           ) : null}
         </p>
@@ -196,7 +196,7 @@ export function EarlyView() {
         </button>
       </div>
 
-      {error && <p className="mb-3 rounded-lg border border-clay/30 bg-clay/10 p-3 text-sm text-clay">{error}</p>}
+      {error && <p className="mb-3 rounded-lg border border-negative/30 bg-negative/10 p-3 text-sm text-negative">{error}</p>}
 
       <div className="overflow-x-auto rounded-xl border border-line">
         <table className="w-full text-left text-sm" data-testid="early-table">
@@ -245,18 +245,18 @@ export function EarlyView() {
                   <td className={`px-3 py-2 text-right font-mono text-xs ${pc.cls}`}>{pc.text}</td>
                   <td className="px-3 py-2 text-right font-mono text-xs" title={liqAge == null ? "没有流动性时间" : `更新于 ${fmtRelativeAge(now, t.liquidityUpdatedAt!)} 前`}>
                     {fmtUsd(t.liquidity)}
-                    {liqAge != null && liqAge > 86_400 ? <span className="ml-1 text-clay">旧</span> : null}
+                    {liqAge != null && liqAge > 86_400 ? <span className="ml-1 text-negative">旧</span> : null}
                   </td>
                   <td className={`px-3 py-2 text-right font-mono text-xs ${ld.cls}`} title={ld.title}>{ld.text}</td>
                   <td className="px-3 py-2 text-right font-mono text-xs">{fmtUsd(t.volume24h)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-xs text-moss">{fmtInt(t.buys24h)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-xs text-clay">{fmtInt(t.sells24h)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-xs text-positive">{fmtInt(t.buys24h)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-xs text-negative">{fmtInt(t.sells24h)}</td>
                   <td className="px-3 py-2 text-right font-mono text-xs">{fmtInt(t.swaps24h)}</td>
                   <td className="px-3 py-2 text-right font-mono text-xs">{fmtInt(t.holders)}</td>
                   <td className="px-3 py-2 text-right font-mono text-xs text-muted">
                     {t.createdAt == null ? "—" : fmtRelativeAge(now, t.createdAt)}
                   </td>
-                  <td className="px-3 py-2 text-right font-mono text-xs text-brass">{fmtUsd(t.toMain)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-xs text-primary">{fmtUsd(t.toMain)}</td>
                 </tr>
               );
             })}

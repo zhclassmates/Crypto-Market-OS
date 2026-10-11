@@ -14,3 +14,24 @@ screenshots/
 rh_v2/*.lock
 scripts/*.out.json
 scripts/rebuild-market-finalized.*.json
+
+# Grok runtime files
+.grok/*.log
+.grok/*.pid
+.grok/*.lock
+.grok/*-status.json
+.grok/history-api-events.jsonl
+.grok/history-coverage.json
+.grok/history-coverage-daily/
+.grok/preview.log
+.grok/dev.log
+.grok/access_loop.log
+.grok/market-revive.log
+.grok/unified-refresh.log
+
+# Backup data
+backups/
+
+# Integration logs
+integration/**/*.log
+integration/**/__pycache__/

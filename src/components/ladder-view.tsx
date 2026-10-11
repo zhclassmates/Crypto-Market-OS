@@ -134,7 +134,7 @@ function Chip({
       onClick={onClick}
       className={
         "min-h-11 rounded-full border px-3 text-sm " +
-        (on ? "border-brass text-brass" : "border-line text-muted hover:text-fg")
+        (on ? "border-primary text-primary" : "border-line text-muted hover:text-fg")
       }
     >
       {children}
@@ -265,7 +265,7 @@ export function LadderView() {
             type="button"
             onClick={refreshAlpha}
             disabled={busy}
-            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm text-fg hover:border-brass disabled:opacity-60"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full border border-line px-4 text-sm text-fg hover:border-primary disabled:opacity-60"
           >
             <RefreshCw className={"size-4 " + (busy ? "animate-spin" : "")} />
             {busy ? "正在对币安" : "对一次币安 Alpha"}
@@ -280,7 +280,7 @@ export function LadderView() {
 
       <section className="grid gap-3 lg:grid-cols-2">
         <div className="rounded-xl border border-line bg-surface p-4">
-          <h2 className="text-sm font-medium text-clay">别被成交额骗了</h2>
+          <h2 className="text-sm font-medium text-negative">别被成交额骗了</h2>
           <p className="mt-1 text-xs text-muted">成交额排在前面，但换手、池深或币龄过不了硬门槛。</p>
           <ul className="mt-3 flex flex-col gap-2">
             {book.ruledOut.map((r, i) => (
@@ -308,7 +308,7 @@ export function LadderView() {
             ).map(([name, x]) => (
               <li key={name}>
                 <span className="text-fg">{name}</span>
-                <span className="ml-2 font-mono text-brass">{x.n}</span>
+                <span className="ml-2 font-mono text-primary">{x.n}</span>
                 <span className="mt-0.5 block text-xs text-pretty text-muted">{x.detail}</span>
               </li>
             ))}
@@ -325,7 +325,7 @@ export function LadderView() {
             <article key={v.venue} className="rounded-xl border border-line bg-surface p-4">
               <div className="flex flex-wrap items-baseline gap-2">
                 <h3 className="text-sm font-medium">{v.venue}</h3>
-                <span className="text-xs text-brass">{RULE_KIND[v.kind] ?? v.kind}</span>
+                <span className="text-xs text-primary">{RULE_KIND[v.kind] ?? v.kind}</span>
                 <span className="text-xs text-muted">{v.src}</span>
               </div>
               <ul className="mt-2 list-disc pl-4 text-sm text-fg">
@@ -379,7 +379,7 @@ export function LadderView() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜符号或名字"
-              className="min-h-11 min-w-40 flex-1 rounded-full border border-line bg-bg px-4 text-sm text-fg outline-none placeholder:text-muted focus:border-brass"
+              className="min-h-11 min-w-40 flex-1 rounded-full border border-line bg-bg px-4 text-sm text-fg outline-none placeholder:text-muted focus:border-primary"
             />
           </div>
         </div>
@@ -428,12 +428,12 @@ export function LadderView() {
                     <td className="px-2 py-2 text-xs text-muted">{kindLabel(t.kind)}</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums">{usd(t.vol24h)}</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums">{usd(t.liq)}</td>
-                    <td className={"px-2 py-2 text-right font-mono tabular-nums " + ((tv ?? 0) > 20 ? "text-clay" : "")}>
+                    <td className={"px-2 py-2 text-right font-mono tabular-nums " + ((tv ?? 0) > 20 ? "text-negative" : "")}>
                       {tv == null ? "–" : `${tv.toFixed(1)}x`}
                     </td>
                     {STEPS.concat(APP_STEPS).map((s) => (
                       <td key={s.key} className="px-2 py-2 text-center">
-                        <span className={t.reached[s.key] ? "text-moss" : "text-line"}>{t.reached[s.key] ? "●" : "·"}</span>
+                        <span className={t.reached[s.key] ? "text-positive" : "text-line"}>{t.reached[s.key] ? "●" : "·"}</span>
                       </td>
                     ))}
                   </tr>
@@ -449,17 +449,17 @@ export function LadderView() {
       </section>
 
       {selected ? (
-        <aside className="rounded-xl border border-brass/40 bg-surface p-4">
+        <aside className="rounded-xl border border-primary/40 bg-surface p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="font-mono text-lg">{selected.symbol}</h2>
             <div className="flex flex-wrap gap-3 text-sm">
               {selected.address ? (
-                <a className="inline-flex min-h-11 items-center gap-1 text-brass" href={`https://dexscreener.com/robinhood/${selected.address}`} target="_blank" rel="noreferrer">
+                <a className="inline-flex min-h-11 items-center gap-1 text-primary" href={`https://dexscreener.com/robinhood/${selected.address}`} target="_blank" rel="noreferrer">
                   DexScreener <ExternalLink className="size-3.5" />
                 </a>
               ) : null}
               {selected.address ? (
-                <a className="inline-flex min-h-11 items-center gap-1 text-brass" href={`https://robinscan.io/token/${selected.address}`} target="_blank" rel="noreferrer">
+                <a className="inline-flex min-h-11 items-center gap-1 text-primary" href={`https://robinscan.io/token/${selected.address}`} target="_blank" rel="noreferrer">
                   {shortAddr(selected.address)} <ExternalLink className="size-3.5" />
                 </a>
               ) : null}
@@ -474,7 +474,7 @@ export function LadderView() {
           </dl>
           <div className="mt-3 flex flex-wrap gap-2">
             {STEPS.concat(APP_STEPS).map((s) => (
-              <span key={s.key} className={"rounded-full border px-3 py-1 text-xs " + (selected.reached[s.key] ? "border-moss text-moss" : "border-line text-muted")}>
+              <span key={s.key} className={"rounded-full border px-3 py-1 text-xs " + (selected.reached[s.key] ? "border-positive text-positive" : "border-line text-muted")}>
                 {s.label}
                 {s.key === "kr" && selected.krVenue && selected.reached.kr ? ` · ${selected.krVenue}` : ""}
               </span>
@@ -548,7 +548,7 @@ function Track({
                 onClick={() => onPick(on ? null : s.key)}
                 className={
                   "flex min-h-11 min-w-16 flex-col items-start rounded-lg border px-3 py-1 " +
-                  (on ? "border-brass bg-bg" : "border-line hover:border-brass")
+                  (on ? "border-primary bg-bg" : "border-line hover:border-primary")
                 }
               >
                 <span className="font-mono text-xl leading-none tabular-nums text-fg">{s.count}</span>
@@ -585,7 +585,7 @@ function GateCard({
             <button type="button" onClick={() => onPick(c.address)} className="w-full text-left">
               <div className="flex flex-wrap items-baseline gap-2">
                 <span className="font-mono">{c.symbol}</span>
-                <span className={"font-mono tabular-nums " + ((s.score ?? 0) >= 70 ? "text-moss" : (s.score ?? 0) >= 40 ? "text-brass" : "text-muted")}>
+                <span className={"font-mono tabular-nums " + ((s.score ?? 0) >= 70 ? "text-positive" : (s.score ?? 0) >= 40 ? "text-primary" : "text-muted")}>
                   {s.score}
                 </span>
                 <span className="text-xs text-muted">下一级 {c.next}</span>
@@ -598,7 +598,7 @@ function GateCard({
                     title={ch.title}
                     className={
                       "rounded-full border px-2 py-0.5 text-xs " +
-                      (ch.ok ? "border-moss text-moss" : ch.ok === false ? "border-clay text-clay" : "border-line text-muted")
+                      (ch.ok ? "border-positive text-positive" : ch.ok === false ? "border-negative text-negative" : "border-line text-muted")
                     }
                   >
                     {ch.label}

@@ -7,7 +7,7 @@ describe("watchlist", () => {
     const now = 1_700_000_000;
     let items = toggleWatchItem([], { chain: "sol", address: "mintA", symbol: "SI", name: "one" }, now);
     items = toggleWatchItem(items, { chain: "eth", address: "0xabc", symbol: "SI", name: "two" }, now + 1);
-    assert.deepEqual(items.map((w) => watchKey(w.chain, w.address)), ["sol:minta", "eth:0xabc"]);
+    assert.deepEqual(items.map((w) => watchKey(w.chain, w.address)), ["sol:mintA", "eth:0xabc"]);
     assert.equal(items[1].addedAt, now + 1);
   });
 
@@ -57,4 +57,10 @@ describe("watchlist", () => {
     writeWatchlist(storage, []);
     assert.deepEqual(loadWatchlist(storage), []);
   });
+});
+
+it("Solana case-distinct contracts remain separate watch identities",()=>{
+ const items=parseWatchlist(JSON.stringify([{chain:'sol',address:'MintA'},{chain:'sol',address:'minta'}]));
+ assert.equal(items.length,2);
+ assert.equal(toggleWatchItem(items,{chain:'sol',address:'MintA',name:null,symbol:null},3).length,1);
 });

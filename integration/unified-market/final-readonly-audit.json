@@ -1,0 +1,41 @@
+{
+  "quality_reports": [
+    {
+      "provider": "cmc",
+      "status": "trusted"
+    },
+    {
+      "provider": "cg",
+      "status": "trusted"
+    },
+    {
+      "provider": "dex",
+      "status": "trusted"
+    }
+  ],
+  "daily": [
+    {
+      "date_utc": "2026-10-09",
+      "provider": "cmc",
+      "time_basis": "utc_finalized",
+      "rows": 8141
+    },
+    {
+      "date_utc": "2026-10-10",
+      "provider": "cg",
+      "time_basis": "intraday",
+      "rows": 11268
+    },
+    {
+      "date_utc": "2026-10-10",
+      "provider": "dex",
+      "time_basis": "intraday",
+      "rows": 1
+    }
+  ],
+  "not_comparable": 9996,
+  "reviewed_links": 0,
+  "research_rows": 0,
+  "module_version": "unified-v1.5",
+  "original_read_only": true
+}

@@ -8,20 +8,20 @@ import type { CollectOk } from "@/lib/rh/collect-core";
 import type { Part, Scored } from "@/lib/rh/types";
 
 const STATE_CLASS: Record<string, string> = {
-  READY: "text-moss",
-  RESEARCH: "text-brass",
+  READY: "text-positive",
+  RESEARCH: "text-primary",
   ACCELERATING: "text-fg",
   WATCH: "text-muted",
-  OVERHEATED: "text-clay",
+  OVERHEATED: "text-negative",
   INVALID: "text-muted",
 };
 
 const DOT: Record<string, string> = {
-  READY: "bg-moss",
-  RESEARCH: "bg-brass",
+  READY: "bg-positive",
+  RESEARCH: "bg-primary",
   ACCELERATING: "bg-fg",
   WATCH: "bg-line",
-  OVERHEATED: "bg-clay",
+  OVERHEATED: "bg-negative",
   INVALID: "bg-line",
 };
 
@@ -81,7 +81,7 @@ function Replay() {
                 setPlay(false);
                 setHour(Number(e.target.value));
               }}
-              className="w-full accent-brass"
+              className="w-full accent-primary"
             />
           </label>
           <span className="font-mono text-xs text-muted">{stamp(frame.now * 1000)}</span>
@@ -90,7 +90,7 @@ function Replay() {
           剧本时钟从 {stamp(T0 * 1000)} 起。观察池门槛：池深 ≥ $25k 且 24h 成交 ≥ $20k。升级立刻生效，降级要连续 2 小时，过热和失效立刻生效。
         </p>
         {frame.alerts.length ? (
-          <p className="text-sm text-moss">本小时新进入：{frame.alerts.join(" · ")}</p>
+          <p className="text-sm text-positive">本小时新进入：{frame.alerts.join(" · ")}</p>
         ) : (
           <p className="text-xs text-muted">本小时没有新的 READY / RESEARCH。</p>
         )}
@@ -175,8 +175,8 @@ function Replay() {
         <ul className="mt-3 grid gap-2 sm:grid-cols-2">
           {checks.map((c) => (
             <li key={c.label} className="flex items-start gap-2 text-sm">
-              <span className={"mt-1 size-2 shrink-0 rounded-full " + (c.ok ? "bg-moss" : "bg-clay")} />
-              <span className={c.ok ? "text-fg" : "text-clay"}>{c.label}</span>
+              <span className={"mt-1 size-2 shrink-0 rounded-full " + (c.ok ? "bg-positive" : "bg-negative")} />
+              <span className={c.ok ? "text-fg" : "text-negative"}>{c.label}</span>
             </li>
           ))}
         </ul>
@@ -206,7 +206,7 @@ function Inspector({ row }: { row: Scored }) {
       <p className="mt-2 text-xs text-pretty text-muted">
         上所 {row.venues} · 自有快照 {row.nHist}h · 持币 {row.holders?.toLocaleString("en-US") ?? "–"}
       </p>
-      <p className="mt-1 text-xs text-pretty text-brass">{row.listingBasis}</p>
+      <p className="mt-1 text-xs text-pretty text-primary">{row.listingBasis}</p>
       <Block title="Heat" score={row.heat} parts={row.heatParts} />
       <Block title="Quality" score={row.quality} parts={row.qualityParts} />
       <div className="mt-4">
@@ -242,7 +242,7 @@ function Block({ title, score, parts }: { title: string; score: number | null; p
               <span className="font-mono text-muted">{p.raw}</span>
             </div>
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-bg">
-              <div className="h-full rounded-full bg-brass" style={{ width: `${(p.mapped ?? 0) * 100}%` }} />
+              <div className="h-full rounded-full bg-primary" style={{ width: `${(p.mapped ?? 0) * 100}%` }} />
             </div>
           </li>
         ))}
@@ -342,7 +342,7 @@ export function ScoreView() {
       </div>
 
       {status === "run" ? <p className="text-sm text-muted">正在请求 GeckoTerminal、DexScreener、币安 Alpha。</p> : null}
-      {status === "err" ? <p className="text-sm text-clay">没跑成：{err}</p> : null}
+      {status === "err" ? <p className="text-sm text-negative">没跑成：{err}</p> : null}
 
       {pack ? (
         <p className="font-mono text-xs text-pretty text-muted">

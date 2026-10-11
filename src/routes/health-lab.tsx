@@ -64,7 +64,7 @@ function HealthLab() {
   const left = Math.max(0, WINDOW_SEC - elapsed);
 
   return (
-    <main className="mx-auto max-w-[1400px] px-4 py-6">
+    <main className="health-lab mx-auto max-w-[1400px] px-4 py-6">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <h1 className="text-lg font-medium">数据源观测</h1>
@@ -73,11 +73,11 @@ function HealthLab() {
             通过条件是成功次数在涨，并且 api_age 落在该源周期内。价格不跳不算失败。
           </p>
         </div>
-        <Link to="/" hash="sec-market" className="font-mono text-sm text-brass hover:underline">
+        <Link to="/" hash="sec-market" className="font-mono text-sm text-primary hover:underline">
           返回市场
         </Link>
       </div>
-      {err && <p className="mb-3 rounded-lg border border-clay/30 bg-clay/10 p-3 text-sm text-clay">{err}</p>}
+      {err && <p className="mb-3 rounded-lg border border-negative/30 bg-negative/10 p-3 text-sm text-negative">{err}</p>}
       <div className="overflow-x-auto rounded-xl border border-line">
         <table className="w-full text-left text-xs">
           <thead>
@@ -108,9 +108,9 @@ function HealthLab() {
               });
               const tone =
                 verdict.state === "pass"
-                  ? "text-moss"
+                  ? "text-positive"
                   : verdict.state === "fail"
-                    ? "text-clay"
+                    ? "text-negative"
                     : "text-muted";
               return (
                 <tr key={key} className="border-b border-line/50">
@@ -123,7 +123,7 @@ function HealthLab() {
                   <td className="px-3 py-2 text-right font-mono">{fmtAge(s.apiAgeSec)}</td>
                   <td className="px-3 py-2 text-right font-mono">{fmtAge(s.dbAgeSec)}</td>
                   <td className="px-3 py-2 text-right font-mono">{s.p95LatencyMs != null ? `${s.p95LatencyMs}ms` : "—"}</td>
-                  <td className="max-w-64 truncate px-3 py-2 font-mono text-clay" title={s.lastError || ""}>
+                  <td className="max-w-64 truncate px-3 py-2 font-mono text-negative" title={s.lastError || ""}>
                     {s.lastError || "—"}
                   </td>
                   <td className={`px-3 py-2 font-mono ${tone}`}>{verdict.text}</td>

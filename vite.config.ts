@@ -150,6 +150,8 @@ export default defineConfig(({ command, isPreview }) => ({
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
+    // Collector ledgers and checkpoints are runtime state, not frontend source.
+    watch: { ignored: ["**/.grok/**", "**/backups/**", "**/rh_v2/**", "**/screenshots/**", "**/integration/**", "**/reports/**"] },
   },
   preview: {
     host: "127.0.0.1",

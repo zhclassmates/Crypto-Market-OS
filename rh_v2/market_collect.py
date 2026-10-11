@@ -72,13 +72,26 @@ def gmgn(args, timeout=60):
     import market_sched as sched
     sched.guard_or_raise()
     cmd = [GMGN_CLI] + args + ["--raw"]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    import history_api_audit as audit
+    ident,route=audit.start(args)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        audit.event(ident,route,'transport_error')
+        raise
     if r.returncode != 0:
+        audit.event(ident,route,'provider_error')
         msg = r.stderr.strip() or r.stdout.strip() or f"exit {r.returncode}"
         if sched.observe_error(msg):
             raise sched.RateLimited(msg)
         raise RuntimeError(msg)
-    return json.loads(r.stdout)
+    try:
+        payload=json.loads(r.stdout)
+    except ValueError:
+        audit.event(ident,route,'malformed_response')
+        raise
+    audit.event(ident,route,'success')
+    return payload
 
 
 NET_ERR_HINTS = ("fetch failed", "socket", "tls", "econnreset", "etimedout", "other side closed", "network")
@@ -123,9 +136,43 @@ def upsert_daily_kline(con, chain, address, now):
     空响应、非法行、请求失败都不算完成。请求失败由调用方安排重试。
     """
     import market_research as research
-    rows = fetch_kline(chain, address, "1d", now - research.KLINE_FETCH_WINDOW_SEC, now)
-    parsed_ok = isinstance(rows, list)
-    return research.commit_kline_fetch(con, chain, address, rows if parsed_ok else [], now, parsed_ok)
+    import history_growth as growth
+    growth.ensure(con)
+    start=now-research.KLINE_FETCH_WINDOW_SEC
+    birth=con.execute('SELECT token_created_at FROM token_registry WHERE chain=? AND address=?',(chain,address)).fetchone()
+    created=birth[0] if birth else None
+    before=growth.H.valid_closes(growth.H.read_bars(con,chain,address,start,now),now,created)
+    end=now-now%growth.DAY
+    gaps=growth.H.missing_ranges(before,end-8*growth.DAY,end)
+    cur=con.execute('INSERT INTO history_incremental_requests(chain,address,start,end,attempted_at) VALUES(?,?,?,?,?)',
+      (chain,address,gaps[0][0] if gaps else end,gaps[-1][1] if gaps else end,now))
+    request_id=cur.lastrowid
+    con.execute('UPDATE history_incremental_requests SET target_gaps_json=? WHERE id=?',(json.dumps(gaps),request_id))
+    con.commit()  # Persist request cost before I/O, including crashes and failures.
+    try:
+        rows = fetch_kline(chain, address, "1d", start, now)
+        fetched=int(time.time())
+        parsed_ok=isinstance(rows,list)
+        raw=rows if parsed_ok else []
+        accepted=growth.validated_incremental(raw,chain,address,created,start,end,fetched)
+        con.execute('UPDATE history_incremental_requests SET response_json=?,fetched_at=? WHERE id=?',(json.dumps(raw),fetched,request_id))
+        con.commit()
+        written=research.commit_kline_fetch(con,chain,address,accepted,fetched,parsed_ok)
+        after=growth.H.valid_closes(growth.H.read_bars(con,chain,address,start,end),fetched,created)
+        added=set(after)-set(before)
+        growth.record_prices(con,chain,address,added,fetched)
+        growth.record_provenance(con,chain,address,[{'ts':d} for d in added],'incremental',request_id,fetched)
+        old=growth.H.return_days(before,end-8*growth.DAY,end)
+        new=growth.H.return_days(after,end-8*growth.DAY,end)
+        dates=growth.returned_dates(raw)
+        hits=sum(any(a<=d<b for a,b in gaps) for d in dates)
+        con.execute('UPDATE history_incremental_requests SET outcome=?,inserted=?,new_returns=?,new_any=?,new_full=?,rejected=?,returned_dates_json=?,target_hits=? WHERE id=?',
+          ('success' if added else 'no_new_data',len(added),len(set(new)-set(old)),int(not old and bool(new)),int(len(old)<7 and len(new)==7),len(raw)-len(accepted),json.dumps(dates),hits,request_id))
+        return written
+    except Exception as exc:
+        con.execute("UPDATE history_incremental_requests SET outcome='failed',error=? WHERE id=?",(type(exc).__name__+': '+str(exc)[:300],request_id))
+        con.commit()
+        raise
 
 
 def ensure_seed_tokens(con, chain, now, have_today):

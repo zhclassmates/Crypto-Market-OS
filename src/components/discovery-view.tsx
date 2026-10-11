@@ -56,10 +56,10 @@ function useDiscovery(rules: AlertRule[] | null) {
 
 function RankMove({ r }: { r: DiscoveryRow }) {
   const d = r.derived;
-  if (d.trendingNewEntry) return <span className="text-brass">新进榜</span>;
+  if (d.trendingNewEntry) return <span className="text-primary">新进榜</span>;
   if (d.trendingRankMove1h == null) return <span className="text-muted">—</span>;
   const m = d.trendingRankMove1h;
-  return <span className={m > 0 ? "text-moss" : m < 0 ? "text-clay" : "text-muted"}>{m > 0 ? `↑${m}` : m < 0 ? `↓${-m}` : "0"}</span>;
+  return <span className={m > 0 ? "text-positive" : m < 0 ? "text-negative" : "text-muted"}>{m > 0 ? `↑${m}` : m < 0 ? `↓${-m}` : "0"}</span>;
 }
 
 export function DiscoveryView() {
@@ -86,7 +86,7 @@ export function DiscoveryView() {
             key={c}
             type="button"
             onClick={() => setChain(c)}
-            className={"min-h-9 rounded-full border px-3 text-sm " + (chain === c ? "border-brass text-fg" : "border-line text-muted")}
+            className={"min-h-9 rounded-full border px-3 text-sm " + (chain === c ? "border-primary text-fg" : "border-line text-muted")}
           >
             {MARKET_CHAIN_LABEL[c]}
           </button>
@@ -95,7 +95,7 @@ export function DiscoveryView() {
           type="button"
           aria-pressed={onlyCandidates}
           onClick={() => setOnlyCandidates((v) => !v)}
-          className={"min-h-9 rounded-full border px-3 text-sm " + (onlyCandidates ? "border-brass text-fg" : "border-line text-muted")}
+          className={"min-h-9 rounded-full border px-3 text-sm " + (onlyCandidates ? "border-primary text-fg" : "border-line text-muted")}
         >
           只看候选（≥{CANDIDATE_MIN_SCORE} 分）
         </button>
@@ -115,7 +115,7 @@ export function DiscoveryView() {
           最近 {Math.round((data!.universeSec) / 60)} 分钟出现在 Trending / Hot / Trenches 的 {cov.universe} 个 · 有活跃度 {cov.withActivity} · 有 1h 基准 {cov.withBaseline} · 有 1h 涨跌 {cov.withPc1h} · 有已定稿日K指标 {cov.withFinalBars} · 候选 {cov.candidates}
         </p>
       ) : null}
-      {error ? <p className="mb-3 rounded-lg border border-clay/30 bg-clay/10 p-3 text-sm text-clay">{error}</p> : null}
+      {error ? <p className="mb-3 rounded-lg border border-negative/30 bg-negative/10 p-3 text-sm text-negative">{error}</p> : null}
 
       <div className="overflow-x-auto rounded-xl border border-line">
         <table className="w-full text-left text-sm">
@@ -148,7 +148,7 @@ export function DiscoveryView() {
                   </button>
                 </td>
                 <td className="px-3 py-2 text-right font-mono text-sm">
-                  <span className={r.score.candidate ? "text-moss" : "text-fg"}>{r.score.score}</span>
+                  <span className={r.score.candidate ? "text-positive" : "text-fg"}>{r.score.score}</span>
                   <span className="text-muted">/{r.score.evaluated}</span>
                 </td>
                 <td className="max-w-64 px-3 py-2 text-xs text-muted" title={r.score.reasons.join("\n")}>
@@ -289,7 +289,7 @@ export function AlertsView() {
   return (
     <div className="mx-auto max-w-[1100px] px-4 py-6">
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Bell className="size-4 text-brass" />
+        <Bell className="size-4 text-primary" />
         <h2 className="text-lg font-medium">告警</h2>
         <span className="font-mono text-xs text-muted" data-testid="alert-count">
           命中 {hits.length} · 新 {fresh.length}
@@ -304,7 +304,7 @@ export function AlertsView() {
           </button>
         </div>
       </div>
-      {error ? <p className="mb-3 rounded-lg border border-clay/30 bg-clay/10 p-3 text-sm text-clay">{error}</p> : null}
+      {error ? <p className="mb-3 rounded-lg border border-negative/30 bg-negative/10 p-3 text-sm text-negative">{error}</p> : null}
 
       <section className="rounded-xl border border-line p-4">
         <h3 className="text-sm font-medium">规则</h3>
@@ -341,13 +341,13 @@ export function AlertsView() {
               {MARKET_CHAIN_TABS.map((c) => <option key={c} value={c}>{MARKET_CHAIN_LABEL[c]}</option>)}
             </select>
           </label>
-          <button type="button" onClick={addRule} className="inline-flex h-9 items-center gap-1 rounded-full border border-brass px-3 text-sm">
+          <button type="button" onClick={addRule} className="inline-flex h-9 items-center gap-1 rounded-full border border-primary px-3 text-sm">
             <Plus className="size-4" /> 添加
           </button>
           <button type="button" onClick={() => update(DEFAULT_RULES)} className="h-9 rounded-full border border-line px-3 text-sm text-muted hover:text-fg">
             恢复默认
           </button>
-          {formErr ? <span className="pb-2 text-xs text-clay">{formErr}</span> : null}
+          {formErr ? <span className="pb-2 text-xs text-negative">{formErr}</span> : null}
         </div>
 
         <ul className="mt-4 divide-y divide-line/60">
@@ -360,12 +360,12 @@ export function AlertsView() {
                   checked={r.enabled}
                   aria-label="启用"
                   onChange={() => update((rules ?? []).map((x) => (x.id === r.id ? { ...x, enabled: !x.enabled } : x)))}
-                  className="size-4 accent-[var(--color-brass)]"
+                  className="size-4 accent-[var(--color-primary)]"
                 />
                 <span className={"text-sm " + (r.enabled ? "" : "text-muted line-through")}>{describe(r)}</span>
                 <span className="font-mono text-[10px] text-muted">{r.chain ? MARKET_CHAIN_LABEL[r.chain] : "全部链"}</span>
                 <span className="ml-auto font-mono text-xs text-muted">命中 {n}</span>
-                <button type="button" aria-label="删除规则" onClick={() => update((rules ?? []).filter((x) => x.id !== r.id))} className="inline-flex size-8 items-center justify-center rounded-full text-muted hover:bg-surface-2 hover:text-clay">
+                <button type="button" aria-label="删除规则" onClick={() => update((rules ?? []).filter((x) => x.id !== r.id))} className="inline-flex size-8 items-center justify-center rounded-full text-muted hover:bg-surface-2 hover:text-negative">
                   <Trash2 className="size-4" />
                 </button>
               </li>
@@ -380,7 +380,7 @@ export function AlertsView() {
         <ul className="divide-y divide-line/50">
           {hits.slice(0, 300).map((h) => (
             <li key={h.key} className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm">
-              {freshKeys.has(h.key) ? <span className="rounded-full bg-brass/20 px-1.5 font-mono text-[10px] text-brass">新</span> : null}
+              {freshKeys.has(h.key) ? <span className="rounded-full bg-primary/20 px-1.5 font-mono text-[10px] text-primary">新</span> : null}
               <button type="button" className="font-medium hover:underline" onClick={() => setDetail({ chain: h.chain, address: h.address })}>
                 {h.symbol || "?"}
               </button>

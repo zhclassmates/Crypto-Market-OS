@@ -1,0 +1,101 @@
+{
+ "success": true,
+ "data": [
+  {
+   "symbol": "btc_krw",
+   "status": "launched",
+   "baseCurrency": "btc",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "eth_krw",
+   "status": "launched",
+   "baseCurrency": "eth",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "xrp_krw",
+   "status": "stopped",
+   "baseCurrency": "xrp",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "sol_krw",
+   "status": "launched",
+   "baseCurrency": "sol",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "doge_krw",
+   "status": "launched",
+   "baseCurrency": "doge",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "ada_krw",
+   "status": "launched",
+   "baseCurrency": "ada",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "trx_krw",
+   "status": "launched",
+   "baseCurrency": "trx",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "link_krw",
+   "status": "launched",
+   "baseCurrency": "link",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "avax_krw",
+   "status": "launched",
+   "baseCurrency": "avax",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "dot_krw",
+   "status": "launched",
+   "baseCurrency": "dot",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "usdt_krw",
+   "status": "launched",
+   "baseCurrency": "usdt",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  },
+  {
+   "symbol": "sui_krw",
+   "status": "launched",
+   "baseCurrency": "sui",
+   "quoteCurrency": "krw",
+   "minOrderValue": "5000",
+   "maxOrderValue": "1000000000"
+  }
+ ]
+}

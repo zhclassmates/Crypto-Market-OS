@@ -117,7 +117,7 @@ export function RadarView() {
           在榜 <span className="text-fg">{data?.universeCount ?? "—"}</span>
         </span>
         <span className="font-mono text-muted">
-          命中 <span className="text-brass">{data?.hits.length ?? "—"}</span>
+          命中 <span className="text-primary">{data?.hits.length ?? "—"}</span>
         </span>
         {readDrift !== null && (
           <span className="font-mono text-muted">
@@ -130,7 +130,7 @@ export function RadarView() {
         <button
           type="button"
           onClick={() => refresh()}
-          className="ml-auto inline-flex items-center gap-1 rounded-full border border-line px-3 py-1 text-muted hover:border-brass hover:text-fg"
+          className="ml-auto inline-flex items-center gap-1 rounded-full border border-line px-3 py-1 text-muted hover:border-primary hover:text-fg"
         >
           <RefreshCw className={"size-3.5 " + (loading ? "animate-spin" : "")} />
           刷新
@@ -138,7 +138,7 @@ export function RadarView() {
       </div>
 
       {data?.error && (
-        <p className="mb-4 rounded-lg border border-clay/40 bg-clay/10 px-3 py-2 text-xs text-clay">
+        <p className="mb-4 rounded-lg border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">
           {data.error}
         </p>
       )}
@@ -177,7 +177,7 @@ export function RadarView() {
                           冷却抑制
                         </span>
                       ) : (
-                        <span className="rounded border border-moss/40 px-1.5 py-0.5 font-mono text-[10px] text-moss">
+                        <span className="rounded border border-positive/40 px-1.5 py-0.5 font-mono text-[10px] text-positive">
                           放行
                         </span>
                       )}
@@ -225,7 +225,7 @@ export function RadarView() {
                     <td className="px-2 py-2 font-mono">{h.source}</td>
                     <td className="px-2 py-2">
                       <span className="inline-flex items-center gap-1.5 font-mono">
-                        <span className={`size-2 rounded-full ${h.success ? "bg-moss" : "bg-clay"}`} />
+                        <span className={`size-2 rounded-full ${h.success ? "bg-positive" : "bg-negative"}`} />
                         {h.success ? "ok" : "dead"}
                       </span>
                     </td>
@@ -237,7 +237,7 @@ export function RadarView() {
                     <td className="px-2 py-2 text-right font-mono">{h.nullRate !== null ? (h.nullRate * 100).toFixed(0) + "%" : "—"}</td>
                     <td className="px-2 py-2 text-right font-mono">{fmtAgeSec(h.ageSec)}</td>
                     <td className="px-2 py-2 text-right font-mono text-muted">{h.tsSemantics ?? "—"}</td>
-                    <td className="max-w-56 truncate px-2 py-2 font-mono text-[10px] text-clay" title={h.error ?? ""}>
+                    <td className="max-w-56 truncate px-2 py-2 font-mono text-[10px] text-negative" title={h.error ?? ""}>
                       {h.error ?? "—"}
                     </td>
                   </tr>
@@ -270,8 +270,8 @@ export function RadarView() {
                     <tr key={b.ts} className="border-b border-line/60 last:border-b-0">
                       <td className="px-2 py-1.5 font-mono">{barUtc(b.ts)}</td>
                       <td className="px-2 py-1.5 text-right font-mono">{b.universe}</td>
-                      <td className="px-2 py-1.5 text-right font-mono text-brass">{b.hits}</td>
-                      <td className="px-2 py-1.5 text-right font-mono text-moss">{b.fired}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-primary">{b.hits}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-positive">{b.fired}</td>
                     </tr>
                   ))}
                 </tbody>

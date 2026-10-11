@@ -16,7 +16,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/rh/streak.test.ts src/lib/rh/daily-filter.test.ts src/lib/rh/market-chains.test.ts src/lib/rh/market-stats.test.ts src/lib/rh/market-table-ui.test.ts src/lib/rh/watchlist.test.ts src/lib/rh/discovery.test.ts src/lib/rh/discovery-core.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/rh/streak.test.ts src/lib/rh/daily-filter.test.ts src/lib/rh/market-chains.test.ts src/lib/rh/market-stats.test.ts src/lib/rh/market-table-ui.test.ts src/lib/rh/watchlist.test.ts src/lib/rh/discovery.test.ts src/lib/rh/discovery-core.test.ts src/lib/rh/market-access.test.ts src/lib/rh/hidden-tokens.test.ts src/lib/rh/market-browse.test.ts src/lib/rh/access-core.test.ts src/lib/rh/wm-unified-query.test.ts src/lib/rh/wm-unified-display.test.ts src/lib/rh/wm-unified-cache.test.ts && python3 -m unittest discover -s rh_v2 -p test_radar_engine.py",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

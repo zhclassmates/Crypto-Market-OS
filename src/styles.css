@@ -1,17 +1,34 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #12110e;
-  --color-surface: #1c1b16;
-  --color-surface-2: #26241e;
-  --color-fg: #f3efe4;
-  --color-muted: #9c978c;
-  --color-line: #343228;
-  --color-brass: #d7b56a;
-  --color-moss: #8fb573;
-  --color-clay: #e07a68;
+  --color-bg: #f6f9fc;
+  --color-surface: #ffffff;
+  --color-surface-2: #edf2f8;
+  --color-fg: #0a2540;
+  --color-muted: #52647b;
+  --color-line: #dce4ef;
+  --color-primary: #635bff;
+  --color-primary-hover: #5046e5;
+  --color-positive: #087f6b;
+  --color-negative: #c83b58;
+  --color-overlay: #0a2540;
+  --color-brand-purple: #a960ee;
+  --color-brand-pink: #ff73ba;
+  --color-brand-orange: #ffb56b;
+  --color-brand-cyan: #80e9ff;
+  --color-chain-sol: #9945ff;
+  --color-chain-robinhood: #00a804;
+  --color-chain-base: #0052ff;
+  --color-chain-eth: #627eea;
+  --color-chain-bsc: #ba8600;
   --font-sans: "IBM Plex Sans", "PingFang SC", "Noto Sans SC", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+:root {
+  color-scheme: light;
+  --shadow-card: 0 2px 5px rgb(10 37 64 / 3%), 0 12px 30px rgb(10 37 64 / 4%);
+  --shadow-drawer: -12px 0 48px rgb(10 37 64 / 15%);
 }
 
 @layer base {
@@ -33,14 +50,18 @@
     cursor: pointer;
   }
   :focus-visible {
-    outline: 2px solid var(--color-brass);
+    outline: 2px solid var(--color-primary);
     outline-offset: 2px;
   }
 }
 
 @keyframes cell-flash {
-  0% { background: color-mix(in srgb, var(--color-brass) 55%, transparent); }
-  100% { background: transparent; }
+  0% {
+    background: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
 }
 .cell-flash {
   animation: cell-flash 800ms ease-out;
@@ -57,8 +78,9 @@
   border-spacing: 0;
 }
 
-/* 固定列：★ | Token | Price | Age | FDV/MC。日期列在其右侧单独横向滚动。 */
+/* 固定列：★ | × | Token | Price | Age | FDV/MC。日期列在其右侧单独横向滚动。 */
 .market-star-sticky,
+.market-hide-sticky,
 .market-token-sticky,
 .market-price-col,
 .market-age-col,
@@ -75,8 +97,17 @@
   max-width: 2.5rem;
 }
 
-.market-token-sticky {
+.market-hide-sticky {
   left: 2.5rem;
+  z-index: 12;
+  width: 1.75rem;
+  min-width: 1.75rem;
+  max-width: 1.75rem;
+  padding-inline: 0 !important;
+}
+
+.market-token-sticky {
+  left: 4.25rem;
   z-index: 11;
   width: 12.5rem;
   min-width: 12.5rem;
@@ -84,7 +115,7 @@
 }
 
 .market-price-col {
-  left: 15rem;
+  left: 16.75rem;
   z-index: 11;
   width: 6.25rem;
   min-width: 6.25rem;
@@ -92,7 +123,7 @@
 }
 
 .market-age-col {
-  left: 21.25rem;
+  left: 23rem;
   z-index: 11;
   width: 3.5rem;
   min-width: 3.5rem;
@@ -100,7 +131,7 @@
 }
 
 .market-fdv-col {
-  left: 24.75rem;
+  left: 26.5rem;
   z-index: 11;
   width: 4.5rem;
   min-width: 4.5rem;
@@ -108,7 +139,7 @@
   border-right: 1px solid var(--color-line);
 }
 
-/* 窄屏放不下五列固定：只固定 ★ + Token，其余跟日期一起滚，保证日期区还看得见。 */
+/* 窄屏放不下六列固定：只固定 ★ + × + Token，其余跟日期一起滚，保证日期区还看得见。 */
 @media (max-width: 767px) {
   .market-price-col,
   .market-age-col,
@@ -124,6 +155,7 @@
 }
 
 .market-table > thead .market-star-sticky,
+.market-table > thead .market-hide-sticky,
 .market-table > thead .market-token-sticky,
 .market-table > thead .market-price-col,
 .market-table > thead .market-age-col,
@@ -133,6 +165,7 @@
 }
 
 .market-table > tbody > tr:hover > .market-star-sticky,
+.market-table > tbody > tr:hover > .market-hide-sticky,
 .market-table > tbody > tr:hover > .market-token-sticky,
 .market-table > tbody > tr:hover > .market-price-col,
 .market-table > tbody > tr:hover > .market-age-col,
@@ -140,9 +173,9 @@
   background: color-mix(in srgb, var(--color-surface) 88%, var(--color-bg));
 }
 
-/* 默认视口 = 固定列 29.25rem + 7 个日期列（7 × 4.25rem）。更早的日期向左滚出。 */
+/* 默认视口 = 固定列 31rem + 7 个日期列（7 × 4.25rem）。 */
 .market-table-scroll {
-  max-width: calc(29.25rem + 7 * 4.25rem + 2px);
+  max-width: calc(31rem + 7 * 4.25rem + 2px);
 }
 
 .market-date-col {
@@ -155,9 +188,313 @@
   padding-inline: 0.25rem;
 }
 
-.market-table [data-today="true"] {
-  background: color-mix(in srgb, var(--color-brass) 8%, transparent);
-  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--color-brass) 65%, transparent);
+/* 日期格第二行：同一自然日的 USD 成交量，弱化一档，不撑宽列。 */
+.market-daily-volume {
+  margin-top: 1px;
+  font-size: 10px;
+  line-height: 1.1;
+  color: var(--color-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.market-table [data-latest-finalized="true"] {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--color-primary) 65%, transparent);
+}
+
+/* Shared visual system for every research view and its detail panels. */
+.desk-header {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-line);
+}
+.desk-masthead,
+.desk-hero,
+.desk-navigation,
+.desk-footer {
+  max-width: 1400px;
+  margin-inline: auto;
+  padding-inline: 32px;
+}
+.desk-masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 80px;
+}
+.desk-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -1px;
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--color-primary);
+  color: var(--color-surface);
+}
+.brand-caption {
+  display: block;
+  font-size: 9px;
+  line-height: 1.4;
+  letter-spacing: 1.8px;
+  color: var(--color-muted);
+  font-weight: 500;
+}
+.masthead-actions {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.masthead-label {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.primary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  border-radius: 24px;
+  padding: 8px 18px;
+  color: var(--color-surface);
+  background: var(--color-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.primary-action:hover {
+  background: var(--color-primary-hover);
+}
+.desk-hero {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  padding-top: 20px;
+  padding-bottom: 36px;
+}
+.hero-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+}
+.hero-eyebrow {
+  margin-bottom: 12px;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 1px;
+}
+.desk-hero h1 {
+  font-size: clamp(28px, 3.2vw, 42px);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -1.5px;
+  text-wrap: balance;
+}
+.hero-description {
+  max-width: 650px;
+  margin-top: 14px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--color-muted);
+  text-wrap: pretty;
+}
+.hero-spectrum {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  top: 0;
+  right: 0;
+  width: 40%;
+  height: 100%;
+  opacity: 0.65;
+  background: linear-gradient(
+    120deg,
+    var(--color-brand-cyan) 0%,
+    var(--color-brand-purple) 40%,
+    var(--color-brand-pink) 70%,
+    var(--color-brand-orange) 100%
+  );
+  clip-path: polygon(45% 0, 100% 0, 100% 100%, 100% 100%);
+}
+.desk-navigation {
+  padding-block: 10px;
+}
+.view-navigation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+.view-nav-item {
+  display: inline-flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  white-space: nowrap;
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+.view-nav-item:hover {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+}
+.view-nav-item.is-active {
+  color: var(--color-surface);
+  background: var(--color-primary);
+  box-shadow: 0 3px 8px rgb(99 91 255 / 16%);
+}
+.app-content {
+  min-height: 55vh;
+}
+.app-content > div {
+  max-width: 1400px;
+  padding: 28px 32px 40px;
+}
+.app-content h2,
+.app-content h3 {
+  letter-spacing: -0.25px;
+}
+.app-content h2 {
+  font-weight: 600;
+}
+.app-content :is(section, article, aside, div).rounded-xl.border {
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  border-radius: 12px;
+}
+.app-content :is(section, article, aside, div).rounded-xl.p-4 {
+  padding: 22px;
+}
+.app-content table {
+  background: var(--color-surface);
+}
+.app-content thead {
+  background: var(--color-surface-2);
+}
+.app-content tbody tr:hover {
+  background-color: color-mix(in srgb, var(--color-primary) 3%, var(--color-surface));
+}
+.app-content th {
+  font-weight: 500;
+}
+.app-content button.border-primary:not(:disabled) {
+  color: var(--color-primary);
+  background-color: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+}
+:is(button, a, input, select, summary) {
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+input:not([type="checkbox"]):not([type="radio"]),
+select {
+  min-height: 40px;
+  background-color: var(--color-surface);
+}
+input:focus-visible,
+select:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 13%, transparent);
+}
+[role="dialog"] {
+  background-color: var(--color-surface);
+  color: var(--color-fg);
+  box-shadow: var(--shadow-drawer);
+}
+[role="dialog"] :is(section, div).rounded-xl.border {
+  background: var(--color-surface);
+}
+[role="dialog"] > div:first-child {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--color-line);
+}
+.desk-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-block: 24px;
+  border-top: 1px solid var(--color-line);
+  font-size: 12px;
+}
+.health-lab {
+  padding: 32px;
+}
+.health-lab > div.overflow-x-auto {
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+@media (max-width: 767px) {
+  .desk-masthead,
+  .desk-hero,
+  .desk-navigation,
+  .desk-footer {
+    padding-inline: 20px;
+  }
+  .desk-masthead {
+    height: 72px;
+  }
+  .masthead-label {
+    display: none;
+  }
+  .brand-caption {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+  .desk-hero {
+    padding-top: 20px;
+    padding-bottom: 28px;
+  }
+  .hero-copy {
+    max-width: 100%;
+  }
+  .hero-description {
+    font-size: 13px;
+  }
+  .hero-spectrum {
+    width: 40%;
+    height: 60px;
+    opacity: 0.22;
+  }
+  .desk-navigation {
+    padding-block: 8px;
+  }
+  .view-nav-item {
+    flex-grow: 0;
+  }
+  .app-content > div {
+    padding: 20px 16px 32px;
+  }
+  .app-content :is(section, article, aside, div).rounded-xl.p-4 {
+    padding: 16px;
+  }
+  .app-content button:not(:has(.size-3)):not([data-hide-token]),
+  [role="dialog"] button {
+    min-height: 40px;
+  }
+  .health-lab {
+    padding: 20px 16px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

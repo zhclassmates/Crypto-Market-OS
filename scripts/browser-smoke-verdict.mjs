@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 export function normalizeBodyText(text) {
   return String(text ?? "")
     .replace(/\s+/g, " ")
@@ -35,7 +36,7 @@ export function parseSmokeArgs(argv, env = {}) {
   }
   return {
     url: positional[0] || "http://127.0.0.1:8080/",
-    outPng: positional[1] || "/Users/zhaomosheng/Desktop/ctiwvGy8hZk3VdCu-grok-workspace/screenshots/app-builder-preview.png",
+    outPng: positional[1] || fileURLToPath(new URL("../screenshots/app-builder-preview.png", import.meta.url)),
     baseline,
   };
 }

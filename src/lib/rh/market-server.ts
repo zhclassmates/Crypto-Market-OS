@@ -1,9 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { DatabaseSync, type StatementSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   displayCreated,
   formalStreakEligible,
@@ -18,8 +17,13 @@ import {
   type StreakStatus,
 } from "./streak.ts";
 import {
+  dailyHistoryForWindow,
   dailyReturnsFromFinalized,
+  finalizedDateWindow,
   latestFinalizedDates,
+  parseVolumeUsd,
+  utcDateKey,
+  type DailyHistoryEntry,
   type DailyReturnMap,
 } from "./daily-filter.ts";
 import {
@@ -42,10 +46,7 @@ export interface MarketEligibility {
 }
 
 // RH_MARKET_DB 只用于离线验证（指向数据库副本）；默认仍是生产库。
-const DB_PATH = process.env.RH_MARKET_DB || join(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../rh_v2/market.sqlite",
-);
+const DB_PATH = process.env.RH_MARKET_DB || join(process.cwd(), "rh_v2/market.sqlite");
 
 interface RankedToken {
   chain: string;
@@ -107,6 +108,16 @@ interface RankedToken {
   changeNd: number | null; // 已定稿 UTC 日 K 的 N 日累计。不是滚动 24H，也不是日K
   change1d: number | null; // 日K：最近两根已定稿日 K 的收盘比。closed_daily_change
   dailyReturns: DailyReturnMap;
+  /** 统一 7 日窗口（ndWindowEnd 的 T-6…T0），每格收益 + USD 成交量来自同一根 FINALIZED 日K。 */
+  dailyHistory: DailyHistoryEntry[];
+  /** 全市场新币优先排序键（unix 秒）。null = 系统里没有任何首次时间。 */
+  newnessAt: number | null;
+  newnessSource: "first_seen" | "creation" | null;
+  /**
+   * 是否属于改版前的榜单候选集合（原预筛 + 原服务端剔除规则）。
+   * 连涨榜只在这个集合里筛，保证全市场扩容不改变连涨榜。
+   */
+  streakPool: boolean;
   streak: number | null;
   streakStatus: StreakStatus;
   streakReturn: number | null;
@@ -272,14 +283,16 @@ function dailyKlineHasFetchedAt(db: DatabaseSync): boolean {
 
 function loadDailyBars(db: DatabaseSync): Map<string, DailyBar[]> {
   const sql = dailyKlineHasFetchedAt(db)
-    ? "SELECT chain, address, ts, high, close, fetched_at, finalized_at FROM daily_kline"
-    : "SELECT chain, address, ts, high, close, NULL AS fetched_at, NULL AS finalized_at FROM daily_kline";
+    ? "SELECT chain, address, ts, high, close, volume, fetched_at, finalized_at FROM daily_kline"
+    : "SELECT chain, address, ts, high, close, volume, NULL AS fetched_at, NULL AS finalized_at FROM daily_kline";
   const rows = db.prepare(sql).all() as unknown as {
     chain: string;
     address: string;
     ts: number;
     high: string | null;
     close: string | null;
+    /** GMGN kline volume = USD 成交额（volume / amount 落在当日 [low, high]）。缺失时写的是 ""。 */
+    volume: string | null;
     fetched_at: number | null;
     finalized_at: number | null;
   }[];
@@ -297,6 +310,7 @@ function loadDailyBars(db: DatabaseSync): Map<string, DailyBar[]> {
       close: Number(row.close),
       fetchedAt: row.fetched_at ?? null,
       finalizedAt: row.finalized_at ?? null,
+      volumeUsd: parseVolumeUsd(row.volume),
     });
   }
   return out;
@@ -307,6 +321,47 @@ function loadDailyBars(db: DatabaseSync): Map<string, DailyBar[]> {
  * 全市场 7000+ 个币里大多是这种，整表下发会让接口和页面都卡住。
  */
 const BOARD_PREFILTER = `(t.kline_fetched_at IS NOT NULL OR s.liquidity_num >= ${STREAK_MIN_LIQUIDITY})`;
+
+/** 全市场默认浏览集合里“最新 N 个”的 N。这是首屏浏览集合，不是准入上限：搜索仍查全库。 */
+export const MARKET_BROWSE_NEWEST = 500;
+
+/**
+ * newness = 本系统最早看到它的时间：registry/tokens.first_seen_at 与最早 discovery_event 取最早；
+ * 都没有才退回 creation_timestamp。只用于全市场新币优先，不参与连涨榜任何计算。
+ */
+const MARKET_NEWNESS_CTE = `
+  market_disc AS (
+    SELECT chain, address, MIN(seen_at) AS first_disc FROM discovery_event GROUP BY chain, address
+  ),
+  market_newness AS (
+    SELECT r.chain, r.address,
+           MIN(COALESCE(r.first_seen_at, t.first_seen_at, d.first_disc),
+               COALESCE(t.first_seen_at, d.first_disc, r.first_seen_at),
+               COALESCE(d.first_disc, r.first_seen_at, t.first_seen_at)) AS seen_at,
+           COALESCE(t.token_created_at, r.token_created_at) AS created_at
+    FROM token_registry r
+    LEFT JOIN tokens t ON t.chain = r.chain AND t.address = r.address
+    LEFT JOIN market_disc d ON d.chain = r.chain AND d.address = r.address
+  ),
+  market_newest AS MATERIALIZED (
+    SELECT chain, address FROM market_newness
+    ORDER BY COALESCE(seen_at, created_at) DESC NULLS LAST, chain, address
+    LIMIT ${MARKET_BROWSE_NEWEST}
+  )`;
+
+/**
+ * 全市场默认浏览集合 = 原有榜单预筛 ∪ 有日K ∪ 最新 N 个。
+ * 原预筛集合原样保留在里面，连涨榜的候选集合因此不变。
+ */
+const MARKET_BROWSE_SQL = `(${BOARD_PREFILTER}
+  OR EXISTS (SELECT 1 FROM daily_kline k WHERE k.chain = r.chain AND k.address = r.address)
+  OR EXISTS (SELECT 1 FROM market_newest w WHERE w.chain = r.chain AND w.address = r.address))`;
+
+/** 全库搜索：symbol / name / address 子串，不看浏览集合，不看日K条数。 */
+const MARKET_SEARCH_SQL = `(instr(lower(r.address), :q) > 0
+  OR instr(lower(COALESCE(t.symbol, r.symbol, '')), :q) > 0
+  OR instr(lower(COALESCE(t.name, r.name, '')), :q) > 0)`;
+const MARKET_SEARCH_LIMIT = 200;
 
 function keySet(keys: string[] | undefined): Set<string> | null {
   return keys ? new Set(keys.map((k) => k.toLowerCase())) : null;
@@ -334,7 +389,12 @@ function emptyEligibility(days: number, registry = 0): MarketEligibility {
 }
 
 export const fetchMarketRank = createServerFn({ method: "POST" })
-  .validator(z.object({ days: z.unknown().optional(), keys: z.array(z.string()).max(2000).optional() }))
+  .validator(z.object({
+    days: z.unknown().optional(),
+    keys: z.array(z.string()).max(2000).optional(),
+    /** 全库搜索；给了就只返回命中的 token，不受默认浏览集合限制。 */
+    search: z.string().max(200).optional(),
+  }))
   .handler(async ({ data }): Promise<{
     ok: boolean;
     tokens: RankedToken[];
@@ -362,6 +422,7 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
       const now = Math.floor(Date.now() / 1000);
       const days = parseDays(data.days);
       const watch = keySet(data.keys);
+      const search = watch ? "" : (data.search ?? "").trim().toLowerCase();
       const bars = loadDailyBars(db);
       const optionalSnapshot = optionalSnapshotSelect(db);
       const latestEvents = loadLatestEvents(db, now);
@@ -370,9 +431,18 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
       const registryCount = inclusionStats.totalTokens;
       const eligibility = emptyEligibility(days, registryCount);
 
+      const scope = watch
+        ? ""
+        : search
+          ? `WHERE ${MARKET_SEARCH_SQL}
+             ORDER BY (lower(r.address) = :q OR lower(COALESCE(t.symbol, r.symbol, '')) = :q) DESC,
+                      COALESCE(n.seen_at, n.created_at) DESC NULLS LAST
+             LIMIT ${MARKET_SEARCH_LIMIT}`
+          : `WHERE ${MARKET_BROWSE_SQL}`;
       const tokens = db
         .prepare(
-          `SELECT r.chain, r.address,
+          `WITH ${MARKET_NEWNESS_CTE}
+           SELECT r.chain, r.address,
                   COALESCE(t.symbol, r.symbol) AS symbol,
                   COALESCE(t.name, r.name) AS name,
                   t.logo, t.creation_ts,
@@ -387,13 +457,16 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
                   s.commit_ok, s.chg_price, s.chg_volume, s.chg_liquidity,
                   s.liquidity_num, s.liquidity_updated_at,
                   ${optionalSnapshot},
-                  r.liquidity_50k_observation_type, r.qualified_at
+                  r.liquidity_50k_observation_type, r.qualified_at,
+                  n.seen_at AS newness_seen_at, n.created_at AS newness_created_at,
+                  ${BOARD_PREFILTER} AS legacy_board
            FROM token_registry r
            LEFT JOIN tokens t ON t.chain = r.chain AND t.address = r.address
            LEFT JOIN token_snapshot s ON s.chain = r.chain AND s.address = r.address
-           ${watch ? "" : `WHERE ${BOARD_PREFILTER}`}`,
+           LEFT JOIN market_newness n ON n.chain = r.chain AND n.address = r.address
+           ${scope}`,
         )
-        .all() as unknown as {
+        .all(search ? { q: search } : {}) as unknown as {
         chain: string;
         address: string;
         symbol: string | null;
@@ -458,11 +531,17 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
         liquidity_updated_at: number | null;
         liquidity_50k_observation_type: string | null;
         qualified_at: number | null;
+        newness_seen_at: number | null;
+        newness_created_at: number | null;
+        legacy_board: number | null;
       }[];
 
       const ranked: RankedToken[] = [];
       const finalizedDates = new Set<string>();
       const windowEndTs = canonicalWindowEndTs(now);
+      const ndWindowEnd = windowEndTs == null ? null : utcDateKey(windowEndTs);
+      // 与前端表头同一个函数、同一个输入，保证每行 7 格和表头日期逐一对应。
+      const windowDates = finalizedDateWindow(ndWindowEnd);
       for (const t of tokens) {
         if (watch && !watch.has(`${t.chain}:${t.address}`.toLowerCase())) continue;
         const tokenCreatedAt = t.token_created_at ?? null;
@@ -479,15 +558,18 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
         const changeNd = metrics.changeNd;
         const liq = t.liquidity_num ?? t.liquidity;
         const liqAge = t.liquidity_updated_at == null ? null : now - t.liquidity_updated_at;
-        if (changeNd != null) {
+        // 改版前：预筛 + “没 N 日累计、池子不够、也没连涨就不下发”。现在全市场照常下发，只把旧集合标出来给连涨榜用。
+        const legacyBoard = Number(t.legacy_board ?? 0) === 1;
+        const streakPool = watch != null ||
+          (legacyBoard && !(changeNd == null && !streakBoardEligible(liq) && metrics.streak == null));
+        // 统计口径保持改版前的集合；搜索请求不重复计数。
+        if (!search && (watch != null || legacyBoard) && changeNd != null) {
           eligibility.enoughCandleHistory += 1;
           if (streakBoardEligible(liq)) {
             eligibility.liquidityQualified += 1;
             if (formalStreakEligible(liq, liqAge)) eligibility.freshQualified += 1;
           }
         }
-        // 全市场榜要 N 日累计，连涨榜要流动性门槛；两样都不沾的不下发。自选不过滤。
-        if (!watch && changeNd == null && !streakBoardEligible(liq) && metrics.streak == null) continue;
         ranked.push({
           chain: t.chain,
           address: t.address,
@@ -546,6 +628,10 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
           changeNd,
           change1d: metrics.change1d,
           dailyReturns: dailySeries.returns,
+          dailyHistory: dailyHistoryForWindow(dailySeries.history, windowDates),
+          newnessAt: t.newness_seen_at ?? t.newness_created_at ?? null,
+          newnessSource: t.newness_seen_at != null ? "first_seen" : t.newness_created_at != null ? "creation" : null,
+          streakPool,
           streak: metrics.streak,
           streakStatus: metrics.streakStatus,
           streakReturn: metrics.streakReturn,
@@ -604,9 +690,9 @@ export const fetchMarketRank = createServerFn({ method: "POST" })
 
       return {
         ok: true,
-        tokens: ranked,
+        tokens: ranked.slice(0, 800),
         dailyDates,
-        ndWindowEnd: windowEndTs == null ? null : new Date(windowEndTs * 1000).toISOString().slice(0, 10),
+        ndWindowEnd,
         inclusionStats,
         tierStats,
         days,
@@ -659,7 +745,10 @@ export interface HotToken {
   liquiditySource: string | null;
 }
 
-/** 只读当前榜快照的热列，不扫日 K / 小时价。 */
+/**
+ * 只读当前榜快照的热列，不扫日 K / 小时价。
+ * 8 秒一轮，仍只覆盖原榜单预筛集合；全市场新增的“最新 N 个”（无日K、池子 < 5 万）随 60 秒整表刷新。
+ */
 export const fetchMarketHot = createServerFn({ method: "POST" })
   .validator(z.object({ keys: z.array(z.string()).max(2000).optional() }))
   .handler(async ({ data }): Promise<{

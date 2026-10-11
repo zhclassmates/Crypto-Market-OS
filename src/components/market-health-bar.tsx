@@ -10,15 +10,15 @@ import {
 } from "@/lib/rh/market-status";
 
 const DOT: Record<MarketStatus, string> = {
-  LIVE: "bg-moss",
-  healthy: "bg-moss",
-  DELAYED: "bg-brass",
-  rate_limited: "bg-brass",
-  cooldown: "bg-brass",
-  STALE: "bg-clay",
-  zero_write: "bg-clay",
-  FAILED: "bg-clay",
-  failed: "bg-clay",
+  LIVE: "bg-positive",
+  healthy: "bg-positive",
+  DELAYED: "bg-primary",
+  rate_limited: "bg-primary",
+  cooldown: "bg-primary",
+  STALE: "bg-negative",
+  zero_write: "bg-negative",
+  FAILED: "bg-negative",
+  failed: "bg-negative",
   unsupported: "bg-line",
 };
 
@@ -75,11 +75,11 @@ export function MarketHealthBar() {
     <section className="mb-4 rounded-xl border border-line bg-surface">
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-3 py-2">
         <h2 className="font-mono text-xs tracking-wide text-fg">DATA HEALTH</h2>
-        <Link to="/health-lab" className="font-mono text-xs text-brass hover:underline">
+        <Link to="/health-lab" className="font-mono text-xs text-primary hover:underline">
           2 分钟观测
         </Link>
       </div>
-      {err && <p className="px-3 py-2 text-xs text-clay">{err}</p>}
+      {err && <p className="px-3 py-2 text-xs text-negative">{err}</p>}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead>
@@ -137,7 +137,7 @@ export function MarketHealthBar() {
                     {gmgn ? `${gmgn.hotChanged}/${gmgn.rowsReceived}` : "—"}
                   </td>
                   <td className="px-3 py-2 font-mono">{gmgn?.latencyMs != null ? `${gmgn.latencyMs}ms` : "—"}</td>
-                  <td className="max-w-40 truncate px-3 py-2 font-mono text-clay" title={gmgn?.lastError || ""}>
+                  <td className="max-w-40 truncate px-3 py-2 font-mono text-negative" title={gmgn?.lastError || ""}>
                     {gmgn?.lastError || "—"}
                   </td>
                   <td className="px-3 py-2 font-mono" title="collector_heartbeat">{clock(gmgn?.collectorHeartbeat ?? null)}</td>

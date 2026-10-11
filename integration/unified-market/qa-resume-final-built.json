@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "url": "http://127.0.0.1:8081/#sec-market",
+  "checks": [
+    "50 real unified records",
+    "default research-grade filter matches live SQLite",
+    "actual source/asset counters",
+    "pagination changes database page",
+    "GMGN filter matches database page",
+    "DEX filter includes retained auxiliary records",
+    "contract search",
+    "detail retains CG and DEX source provenance",
+    "star and watch filter",
+    "hide preference excludes before pagination",
+    "whole-market multi-date ranking matches SQLite before pagination",
+    "negative daily return filter matches SQLite",
+    "native Bitcoin chain filter",
+    "mobile content with contained table scrolling"
+  ],
+  "errors": [],
+  "failed": [],
+  "firstAsset": "asset:b8ece0338a1526f99d7c3d1c",
+  "searchedAsset": "asset:6c214e197aab3be44fb127a9",
+  "visibleRows": 50
+}

@@ -10,7 +10,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "阶梯 · Robinhood 链" },
       { name: "description", content: "Robinhood 链上币的上币阶梯，以及 Heat / Quality / ListingP / Entry 四列状态机。" },
-      { name: "theme-color", content: "#12110e" },
+      { name: "theme-color", content: "#f6f9fc" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },

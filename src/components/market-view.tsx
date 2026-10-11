@@ -21,26 +21,29 @@ import {
   formalStreakEligible,
   isPositiveStreak,
   klineIsStale,
-  rankingQualityOk,
   shouldCommitRankWrite,
   type DailyStatus,
   type QualityFlag,
   type StreakStatus,
 } from "@/lib/rh/streak";
 import { MarketHealthBar } from "@/components/market-health-bar";
+import { WmUnifiedMarket } from "@/components/wm-unified-market";
+import { WmQualityBar } from "@/components/wm-quality-bar";
+import { MarketAccessDrawer, type MarketAccessDrawerDetail } from "@/components/market-access-drawer";
 import { TokenDetailDrawer } from "@/components/token-detail";
 import {
-  calendarDateWindow,
   compareDailyReturn,
   cycleDailyFilter,
   dateTOffset,
+  finalizedDateWindow,
   nextPrimarySort,
   type DailyPrimarySort,
   fmtTOffset,
+  formatCompactUsd,
   formatDailyReturn,
   matchesDailyFilters,
   reconcileDailyFilters,
-  utcDateKey,
+  type DailyHistoryEntry,
   type DailyReturnFilters,
   type DailyReturnMap,
 } from "@/lib/rh/daily-filter";
@@ -53,6 +56,26 @@ import {
   type WatchItem,
 } from "@/lib/rh/watchlist";
 import { MARKET_CHAIN_LABEL, MARKET_CHAIN_TABS } from "@/lib/rh/market-chains";
+import { compareNewness, mergeSearchHits } from "@/lib/rh/market-browse";
+import {
+  HIDDEN_TOKENS_EVENT,
+  addHiddenToken,
+  hiddenTokenKey,
+  loadHiddenTokens,
+  removeHiddenToken,
+  writeHiddenTokens,
+} from "@/lib/rh/hidden-tokens";
+import {
+  applyMarketAccessDemo,
+  getLatestAccessEvent,
+  isScheduledAccessEvent,
+  isSurpriseAccessEvent,
+  marketAccessLabel,
+  marketAccessTone,
+  matchesAccessCategory,
+  type AccessCategory,
+  type MarketAccessEvent,
+} from "@/lib/rh/market-access";
 
 interface RankedToken {
   chain: string;
@@ -95,6 +118,12 @@ interface RankedToken {
   changeNd: number | null;
   change1d: number | null;
   dailyReturns: DailyReturnMap;
+  /** 统一 7 日窗口每格：收益 + USD 成交量，同一根 FINALIZED 日K。只展示，不参与排序 / 筛选。 */
+  dailyHistory?: DailyHistoryEntry[];
+  /** 全市场新币优先排序键：系统首次看到的时间，缺失才退回 creation。 */
+  newnessAt?: number | null;
+  /** 改版前的榜单候选集合；连涨榜只在其中筛，全市场扩容不改连涨榜。 */
+  streakPool?: boolean;
   streak: number | null;
   streakStatus?: StreakStatus;
   streakReturn: number | null;
@@ -132,6 +161,7 @@ interface RankedToken {
   return2d: number | null;
   return3d: number | null;
   return5d: number | null;
+  marketAccess?: MarketAccessEvent[];
 }
 
 interface ViewToken extends RankedToken {
@@ -146,13 +176,11 @@ interface ViewToken extends RankedToken {
 }
 
 const CHAIN_BADGE: Record<string, string> = {
-  sol: "bg-[#9945FF]", robinhood: "bg-[#00C805]", base: "bg-[#0052FF]", eth: "bg-[#627EEA]", bsc: "bg-[#F0B90B]",
+  sol: "bg-chain-sol", robinhood: "bg-chain-robinhood", base: "bg-chain-base", eth: "bg-chain-eth", bsc: "bg-chain-bsc",
 };
 const HEAVY_MS = 60_000;
 const HOT_MS = 8_000;
 const REORDER_MS = 20_000;
-/** 一次只画这么多行。整表上千行每秒重绘会把页面拖住。 */
-const PAGE_ROWS = 100;
 
 function fmtPrice(v: string | number | null | undefined): string {
   const n = Number(v);
@@ -184,8 +212,8 @@ function fmtPct(v: number | null | undefined): string {
 }
 function pctColor(v: number | null | undefined): string {
   if (v == null) return "text-muted";
-  if (v > 0) return "text-moss";
-  if (v < 0) return "text-clay";
+  if (v > 0) return "text-positive";
+  if (v < 0) return "text-negative";
   return "text-muted";
 }
 
@@ -212,15 +240,10 @@ function CopyAddress({ address }: { address: string }) {
         }}
         className="shrink-0 rounded p-0.5 hover:text-fg"
       >
-        {copied ? <Check className="h-3 w-3 text-moss" /> : <Copy className="h-3 w-3" />}
+        {copied ? <Check className="h-3 w-3 text-positive" /> : <Copy className="h-3 w-3" />}
       </button>
     </span>
   );
-}
-
-function FieldStale({ show, title }: { show: boolean; title: string }) {
-  if (!show) return null;
-  return <span className="mr-1 font-mono text-[10px] text-clay" title={title}>stale</span>;
 }
 
 function eligibilityTitle(e: MarketEligibility | null, days: number): string {
@@ -240,9 +263,7 @@ function AnchorTag({ t, now }: { t: ViewToken; now: number }) {
   if (!hasAnchor) return null;
   const age = t.anchorGeneratedAt == null ? null : now - t.anchorGeneratedAt;
   const stale = age == null || age > 2 * SOURCE_PERIOD.robinhood_anchor;
-  if (stale) {
-    return <span className="font-mono text-[10px] text-clay" title="锚价过期，不拿旧锚价做判断">Anchor stale</span>;
-  }
+  if (stale) return null;
   const anchor = adjustedAnchor(t.anchorBid, t.anchorAsk, t.anchorMultiplier);
   const pool = Number(t.dexPrice);
   const dev = anchorDeviation(Number.isFinite(pool) ? pool : null, anchor);
@@ -259,14 +280,18 @@ function TokenCell({
   now,
   showAnchor,
   onOpen,
+  onOpenAccess,
 }: {
   t: ViewToken;
   now: number;
   showAnchor: boolean;
   onOpen: () => void;
+  onOpenAccess: () => void;
 }) {
   const [logoOk, setLogoOk] = useState(true);
   const flags = t.qualityFlags ?? [];
+  const accessEvents = t.marketAccess ?? [];
+  const latestAccess = getLatestAccessEvent(accessEvents);
   const securityRisk = t.securityIsHoneypot === true || t.securityIsBlacklist === true;
   const createdTitle = t.createdAt == null
     ? "没有代币创建时间，也没有池子创建时间"
@@ -296,16 +321,38 @@ function TokenCell({
           <button type="button" onClick={onOpen} title={`${t.symbol || "?"} ${t.name || ""} · 打开详情`} className="min-w-0 truncate text-left text-sm font-medium leading-tight hover:underline">
             {t.symbol || "?"}
           </button>
-          <span className="shrink-0 font-mono text-[10px] text-muted" title={createdTitle}>
-            {t.createdAt == null ? "—" : fmtRelativeAge(now, t.createdAt)}
-          </span>
+          {latestAccess ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenAccess();
+              }}
+              title={`${marketAccessLabel(latestAccess.kind)} · 查看全部市场准入记录`}
+              aria-label={`查看 ${t.symbol || "Token"} 的市场准入状态`}
+              className={`inline-flex h-5 max-w-20 shrink-0 items-center truncate rounded-full border px-1.5 font-mono text-[10px] leading-none ${marketAccessTone(latestAccess.kind)}`}
+            >
+              {marketAccessLabel(latestAccess.kind)}
+            </button>
+          ) : (
+            <span className="shrink-0 font-mono text-[10px] text-muted" title={createdTitle}>
+              {t.createdAt == null ? "—" : fmtRelativeAge(now, t.createdAt)}
+            </span>
+          )}
         </div>
-        <CopyAddress address={t.address} />
+        <div className="flex min-w-0 items-center justify-between gap-1">
+          <CopyAddress address={t.address} />
+          {latestAccess ? (
+            <span className="shrink-0 font-mono text-[10px] text-muted" title={createdTitle}>
+              {t.createdAt == null ? "—" : fmtRelativeAge(now, t.createdAt)}
+            </span>
+          ) : null}
+        </div>
         {flags.length > 0 ? (
-          <p className="truncate font-mono text-[10px] text-brass leading-tight">{flags.join(" · ")}</p>
+          <p className="truncate font-mono text-[10px] text-primary leading-tight">{flags.join(" · ")}</p>
         ) : null}
         {securityTitle ? (
-          <p className={`truncate font-mono text-[10px] leading-tight ${securityRisk ? "text-clay" : "text-muted"}`} title={securityTitle}>
+          <p className={`truncate font-mono text-[10px] leading-tight ${securityRisk ? "text-negative" : "text-muted"}`} title={securityTitle}>
             {securityRisk ? "SECURITY RISK" : "Security checked"}
           </p>
         ) : null}
@@ -346,8 +393,22 @@ function FlashCell({
 }
 
 type SortKey = "changeNd" | "streak" | "volume24h" | "liquidity" | "marketCap" | "price" | "holders" | "streakReturn" | "streakDrawdown" | "buys24h" | "sells24h" | "swaps24h" | "trendingRank";
-type SortMode = SortKey | "added";
+type SortMode = SortKey | "added" | "newness";
 type Board = "all" | "streak" | "watch";
+
+const ACCESS_CATEGORY_OPTIONS: { value: AccessCategory; label: string }[] = [
+  { value: "all", label: "全部状态" },
+  { value: "wallet", label: "Binance Wallet" },
+  { value: "alpha", label: "Alpha" },
+  { value: "alpha-live", label: "Alpha Live" },
+  { value: "futures", label: "Futures" },
+  { value: "spot", label: "Spot" },
+  { value: "pre-market", label: "Pre-market" },
+  { value: "roadmap", label: "Roadmap" },
+  { value: "robinhood", label: "Robinhood" },
+  { value: "upbit", label: "Upbit" },
+  { value: "coinbase", label: "Coinbase" },
+];
 
 function dateLabel(date: string): string {
   return date.slice(5).replace("-", "/");
@@ -368,13 +429,93 @@ function StarButton({ on, onClick }: { on: boolean; onClick: () => void }) {
       }}
       className="inline-flex size-8 shrink-0 items-center justify-center rounded-full hover:bg-surface-2"
     >
-      <Star className={"size-4 " + (on ? "fill-brass text-brass" : "text-muted")} />
+      <Star className={"size-4 " + (on ? "fill-primary text-primary" : "text-muted")} />
     </button>
+  );
+}
+
+function HideTokenButton({ symbol, onClick }: { symbol: string | null; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`隐藏 ${symbol || "Token"}`}
+      title={`隐藏 ${symbol || "Token"}`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
+      className="inline-flex size-7 items-center justify-center rounded-full text-muted opacity-35 hover:bg-surface-2 hover:text-fg hover:opacity-100"
+    >
+      <X className="size-3.5" />
+    </button>
+  );
+}
+
+function HiddenTokensMenu({
+  keys,
+  tokens,
+  onRestore,
+  onRestoreAll,
+}: {
+  keys: readonly string[];
+  tokens: readonly RankedToken[];
+  onRestore: (key: string) => void;
+  onRestoreAll: () => void;
+}) {
+  const tokenByKey = useMemo(
+    () => new Map(tokens.map((token) => [hiddenTokenKey(token.chain, token.address), token])),
+    [tokens],
+  );
+  if (keys.length === 0) return null;
+  return (
+    <details className="relative">
+      <summary className="min-h-9 list-none rounded-full border border-line px-3 py-2 font-mono text-xs text-muted hover:text-fg">
+        已隐藏 {keys.length}
+      </summary>
+      <div className="absolute right-0 z-30 mt-2 w-80 rounded-xl border border-line bg-bg p-3 shadow-xl">
+        <div className="flex items-center justify-between gap-3 border-b border-line pb-2">
+          <p className="text-sm font-medium">已隐藏 Token</p>
+          <button type="button" onClick={onRestoreAll} className="min-h-8 rounded-full px-2 font-mono text-xs text-muted hover:bg-surface-2 hover:text-fg">
+            全部恢复
+          </button>
+        </div>
+        <ul className="max-h-80 overflow-y-auto py-1">
+          {keys.map((key) => {
+            const token = tokenByKey.get(key);
+            return (
+              <li key={key} className="flex items-center justify-between gap-3 border-b border-line/50 py-2 last:border-b-0">
+                <div className="min-w-0">
+                  <p className="truncate text-sm">{token?.symbol || "?"}</p>
+                  <p className="truncate font-mono text-[10px] text-muted" title={key}>{key}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onRestore(key)}
+                  className="min-h-8 shrink-0 rounded-full border border-line px-2 font-mono text-xs text-muted hover:text-fg"
+                >
+                  恢复
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </details>
   );
 }
 
 function keyOf(t: { chain: string; address: string }) {
   return `${t.chain}:${t.address}`;
+}
+
+function fmtAccessAge(timestamp: number | undefined, now: number): string {
+  if (timestamp == null || !Number.isFinite(timestamp)) return "时间未记录";
+  const age = Math.max(0, now - timestamp);
+  if (age < 60) return `${age}秒前`;
+  if (age < 3_600) return `${Math.floor(age / 60)}分钟前`;
+  if (age < 86_400) return `${Math.floor(age / 3_600)}小时前`;
+  return `${Math.floor(age / 86_400)}天前`;
 }
 
 function applyHot(t: RankedToken, hot: HotToken | undefined): RankedToken {
@@ -435,11 +576,12 @@ function decorate(t: RankedToken, clock: GmgnClock | undefined, now: number): Vi
   };
 }
 
-export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boolean }) {
+function LegacyMarketView({ watchOnly: watchProp = false }: { watchOnly?: boolean }) {
   // 周期按钮已删除：顶部 N 日窗口固定为默认值，日期筛选全靠日期列。
   const days = DEFAULT_DAYS;
   const [chain, setChain] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [searchHits, setSearchHits] = useState<{ q: string; tokens: RankedToken[] } | null>(null);
   const [data, setData] = useState<RankedToken[] | null>(null);
   const [dailyFilters, setDailyFilters] = useState<DailyReturnFilters>({});
   // 最后一次点击的日期列 = 唯一主排序键；其他已选日期只参与 AND 筛选
@@ -448,11 +590,14 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
   const [gmgn, setGmgn] = useState<Record<string, GmgnClock>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [sortKey, setSortKey] = useState<SortMode>(watchProp ? "added" : "changeNd");
+  const [sortKey, setSortKey] = useState<SortMode>(watchProp ? "added" : "newness");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [board, setBoard] = useState<Board>(watchProp ? "watch" : "all");
+  const [accessOnly, setAccessOnly] = useState(false);
+  const [accessCategory, setAccessCategory] = useState<AccessCategory>("all");
   const watchOnly = watchProp || board === "watch";
   const [watch, setWatch] = useState<WatchItem[]>([]);
+  const [hiddenKeys, setHiddenKeys] = useState<string[]>([]);
   const [heavyTick, setHeavyTick] = useState(0);
   const [orderTick, setOrderTick] = useState(0);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
@@ -461,8 +606,11 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
   const [ndWindowEnd, setNdWindowEnd] = useState<string | null>(null);
   const [eligibility, setEligibility] = useState<MarketEligibility | null>(null);
   const [appliedDays, setAppliedDays] = useState<number | null>(null);
-  const [limit, setLimit] = useState(PAGE_ROWS);
   const [detail, setDetail] = useState<{ chain: string; address: string } | null>(null);
+  const [accessDetail, setAccessDetail] = useState<MarketAccessDrawerDetail | null>(null);
+  const [activityMode, setActivityMode] = useState<"price" | "access">("price");
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  const demoNow = useRef(Math.floor(Date.now() / 1000));
 
   const rankFn = useServerFn(fetchMarketRank);
   const hotFn = useServerFn(fetchMarketHot);
@@ -485,7 +633,7 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
     // 自选和榜单走两套后端请求（自选不看榜单预筛），切换时先清空，避免拿另一套数据闪一下
     if ((next === "watch") !== (board === "watch")) setData(null);
     setBoard(next);
-    setSortKey(next === "watch" ? "added" : next === "streak" ? "streak" : "changeNd");
+    setSortKey(next === "watch" ? "added" : next === "streak" ? "streak" : "newness");
     setSortDir("desc");
   }
 
@@ -561,6 +709,21 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
       window.removeEventListener(WATCH_EVENT, sync);
     };
   }, []);
+  useEffect(() => {
+    const sync = () => setHiddenKeys(loadHiddenTokens(window.localStorage));
+    sync();
+    window.addEventListener("storage", sync);
+    window.addEventListener(HIDDEN_TOKENS_EVENT, sync);
+    return () => {
+      window.removeEventListener("storage", sync);
+      window.removeEventListener(HIDDEN_TOKENS_EVENT, sync);
+    };
+  }, []);
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const params = new URLSearchParams(window.location.search);
+    setDemoEnabled(params.get("marketAccessDemo") === "1");
+  }, []);
 
   function onStar(t: { chain: string; address: string; symbol: string | null; name: string | null }) {
     const current = loadWatchlist(window.localStorage);
@@ -570,6 +733,35 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
     window.dispatchEvent(new Event(WATCH_EVENT));
   }
 
+  function persistHidden(next: string[]) {
+    writeHiddenTokens(window.localStorage, next);
+    setHiddenKeys(next);
+    window.dispatchEvent(new Event(HIDDEN_TOKENS_EVENT));
+  }
+
+  function hideToken(t: { chain: string; address: string }) {
+    persistHidden(addHiddenToken(loadHiddenTokens(window.localStorage), t.chain, t.address));
+  }
+
+  function restoreHidden(key: string) {
+    persistHidden(removeHiddenToken(loadHiddenTokens(window.localStorage), key));
+  }
+
+  function openTokenDetail(t: { chain: string; address: string }) {
+    setAccessDetail(null);
+    setDetail({ chain: t.chain, address: t.address });
+  }
+
+  function openAccessDetail(t: RankedToken) {
+    setDetail(null);
+    setAccessDetail({
+      chain: t.chain,
+      address: t.address,
+      symbol: t.symbol,
+      events: t.marketAccess ?? [],
+    });
+  }
+
   const watchSig = watchOnly ? (watchKeysParam ?? []).join(",") : "";
   useEffect(() => {
     // 自选为空不用问后端；挂载时 watch 还没读出来，读到后 watchSig 变了会再拉
@@ -577,7 +769,6 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
     load();
     if (watchOnly) loadHot();
   }, [days, watchOnly, watchSig]);
-  useEffect(() => { setLimit(PAGE_ROWS); }, [days, board, chain, search, sortKey, sortDir, dailyFilters, primarySort]);
   useEffect(() => {
     const t = setInterval(() => setHeavyTick((x) => x + 1), HEAVY_MS);
     return () => clearInterval(t);
@@ -605,8 +796,31 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
-  const todayDate = utcDateKey(now);
-  const dailyDates = calendarDateWindow(now);
+  // 搜索查全库：默认浏览集合之外的命中由服务端返回，临时并进当前结果。
+  useEffect(() => {
+    const q = search.trim().toLowerCase();
+    if (watchOnly || q.length < 2) {
+      setSearchHits(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await rankFn({ data: { days: daysRef.current, search: q } });
+        if (!cancelled && res.ok) setSearchHits({ q, tokens: res.tokens });
+      } catch {
+        // 全库搜索失败时退回只搜当前已下发的列表
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [search, watchOnly]);
+
+  // 日期表头只认 API 的全市场统一 ndWindowEnd。缺失时不使用浏览器日期猜测 T。
+  const dailyDates = useMemo(() => finalizedDateWindow(ndWindowEnd), [ndWindowEnd]);
+  const latestFinalizedDate = dailyDates[dailyDates.length - 1] ?? null;
   const dailyDateSignature = dailyDates.join(",");
   useEffect(() => {
     setDailyFilters((current) => reconcileDailyFilters(current, dailyDates));
@@ -616,10 +830,16 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
   function clickDailyDate(date: string) {
     const next = cycleDailyFilter(dailyFilters, date);
     setDailyFilters(next);
-    setPrimarySort((current) => nextPrimarySort(current, date, next[date]));
+    const nextSort = nextPrimarySort(primarySort, date, next[date]);
+    setPrimarySort(nextSort);
+    // 全市场取消日期排序 = 回到新币优先
+    if (primarySort && !nextSort && board === "all" && !watchOnly) {
+      setSortKey("newness");
+      setSortDir("desc");
+    }
   }
 
-  // 默认视口停在最右：今天（T+3）可见，往左滚看更早日期。只在日期轮换 / 换榜 / 首次出数时归位，不打断用户手动滚动。
+  // 默认视口停在最右：统一 T 可见。只在日期轮换 / 换榜 / 首次出数时归位，不打断用户手动滚动。
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const hasData = data != null;
   useLayoutEffect(() => {
@@ -628,11 +848,18 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
   }, [dailyDateSignature, board, hasData]);
 
   const watchKeys = useMemo(() => new Set(watch.map((w) => watchKey(w.chain, w.address))), [watch]);
+  const hiddenKeySet = useMemo(() => new Set(hiddenKeys), [hiddenKeys]);
   const isWatched = (t: { chain: string; address: string }) => watchKeys.has(watchKey(t.chain, t.address));
+  const effectiveAccessCategory: AccessCategory = accessOnly ? accessCategory : "all";
+  const marketData = useMemo(() => {
+    if (!data) return null;
+    const merged = mergeSearchHits(data, searchHits?.q === search.trim().toLowerCase() ? searchHits.tokens : []);
+    return demoEnabled ? applyMarketAccessDemo(merged, demoNow.current) : merged;
+  }, [data, demoEnabled, searchHits, search]);
 
   const filtered = useMemo(() => {
-    if (!data) return [];
-    let arr = data;
+    if (!marketData) return [];
+    let arr = marketData;
     if (watchOnly) arr = arr.filter(isWatched);
     if (chain !== "all") arr = arr.filter((t) => t.chain === chain);
     const q = search.trim().toLowerCase();
@@ -646,22 +873,33 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
     if (Object.keys(dailyFilters).length > 0) {
       arr = arr.filter((t) => matchesDailyFilters(t.dailyReturns ?? {}, dailyFilters));
     }
+    if (accessOnly) {
+      arr = arr.filter((t) => {
+        const accessEvents = t.marketAccess ?? [];
+        return accessEvents.length > 0 && accessEvents.some((event) => matchesAccessCategory(event, effectiveAccessCategory));
+      });
+    }
     return arr;
-  }, [data, chain, search, watchOnly, watchKeys, dailyFilters]);
+  }, [marketData, chain, search, watchOnly, watchKeys, dailyFilters, accessOnly, effectiveAccessCategory]);
 
   const onBoard = (t: ViewToken) => {
     if (watchOnly) return true;
-    if (board === "streak") return formalStreakEligible(t.liquidityNum ?? t.liquidity, t.liquidityAgeSec) && isPositiveStreak(t.streakStatus);
-    // 全市场按 N 日累计排；需要 N+1 根连续 finalized 日K。质量标签不改公式，只决定是否进正式榜。
-    return t.changeNd != null && rankingQualityOk(t.qualityFlags ?? []);
+    if (board === "streak") return t.streakPool !== false && formalStreakEligible(t.liquidityNum ?? t.liquidity, t.liquidityAgeSec) && isPositiveStreak(t.streakStatus);
+    // 全市场是高召回扫描：已收录即上榜，不要求 7D / 8 根日K / 币龄。隐藏由下游单独过滤。
+    return true;
   };
 
   const order = useMemo(() => {
     const rows = filtered
       .map((t) => decorate(applyHot(t, hotRef.current.get(keyOf(t))), gmgnRef.current[t.chain], nowRef.current))
-      .filter(onBoard);
+      .filter(onBoard)
+      .filter((t) => !hiddenKeySet.has(hiddenTokenKey(t.chain, t.address)));
     if (primarySort) {
       rows.sort((a, b) => compareDailyReturn(a.dailyReturns, b.dailyReturns, primarySort));
+      return rows.map(keyOf);
+    }
+    if (sortKey === "newness") {
+      rows.sort(compareNewness);
       return rows.map(keyOf);
     }
     if (sortKey === "added") {
@@ -695,7 +933,7 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
       return sortDir === "desc" ? vb - va : va - vb;
     });
     return rows.map(keyOf);
-  }, [filtered, sortKey, sortDir, primarySort, orderTick, board, watchOnly, watch]);
+  }, [filtered, sortKey, sortDir, primarySort, orderTick, board, watchOnly, watch, hiddenKeySet]);
 
   const shown = useMemo(() => {
     const latest = new Map(filtered.map((t) => [keyOf(t), decorate(applyHot(t, hotMap.get(keyOf(t))), gmgn[t.chain], now)]));
@@ -703,16 +941,16 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
     const seen = new Set<string>();
     for (const k of order) {
       const row = latest.get(k);
-      if (!row || !onBoard(row)) continue;
+      if (!row || !onBoard(row) || hiddenKeySet.has(hiddenTokenKey(row.chain, row.address))) continue;
       rows.push(row);
       seen.add(k);
     }
     for (const [k, row] of latest) {
-      if (seen.has(k) || !onBoard(row)) continue;
+      if (seen.has(k) || !onBoard(row) || hiddenKeySet.has(hiddenTokenKey(row.chain, row.address))) continue;
       rows.push(row);
     }
     return rows;
-  }, [filtered, hotMap, gmgn, now, order, board, watchOnly]);
+  }, [filtered, hotMap, gmgn, now, order, board, watchOnly, hiddenKeySet]);
 
   /** 具备完整数据 = N+1 根连续 FINALIZED 日K。质量标签只决定是否进正式榜，不改这个人数。 */
   const completeNdCount = useMemo(
@@ -728,13 +966,32 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
       .slice(0, 8);
   }, [shown]);
 
+  const accessUpdates = useMemo(() => {
+    return shown
+      .map((token) => {
+        const event = getLatestAccessEvent(token.marketAccess ?? []);
+        return event ? { token, event } : null;
+      })
+      .filter((item): item is { token: ViewToken; event: MarketAccessEvent } => item != null)
+      .sort((a, b) => {
+        const aTime = a.event.detectedAt;
+        const bTime = b.event.detectedAt;
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return bTime - aTime;
+      })
+      .slice(0, 8);
+  }, [shown]);
+
   const dailyFilterDates = Object.keys(dailyFilters);
   const absent = useMemo(() => {
-    if (!watchOnly || data == null || error || dailyFilterDates.length > 0) return [] as WatchItem[];
+    if (!watchOnly || data == null || error || dailyFilterDates.length > 0 || accessOnly) return [] as WatchItem[];
     const live = new Set(data.map((t) => watchKey(t.chain, t.address)));
     const q = search.trim().toLowerCase();
     return watch.filter((w) => {
       if (live.has(watchKey(w.chain, w.address))) return false;
+      if (hiddenKeySet.has(hiddenTokenKey(w.chain, w.address))) return false;
       if (chain !== "all" && w.chain !== chain) return false;
       if (!q) return true;
       return (
@@ -743,7 +1000,7 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
         w.address.toLowerCase().includes(q)
       );
     });
-  }, [watchOnly, data, error, watch, chain, search, dailyFilterDates.length]);
+  }, [watchOnly, data, error, watch, chain, search, dailyFilterDates.length, accessOnly, hiddenKeySet]);
 
   const tableRows = useMemo(() => {
     type Row = { kind: "live"; token: ViewToken } | { kind: "gone"; item: WatchItem };
@@ -790,7 +1047,7 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6">
-      <MarketHealthBar />
+
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
@@ -798,7 +1055,7 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索 token"
-            className="h-9 w-52 rounded-full border border-line bg-bg pl-9 pr-3 text-sm text-fg focus:border-brass focus:outline-none"
+            className="h-9 w-52 rounded-full border border-line bg-bg pl-9 pr-3 text-sm text-fg focus:border-primary focus:outline-none"
           />
         </div>
         {MARKET_CHAIN_TABS.map((c) => (
@@ -806,7 +1063,7 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
             key={c}
             type="button"
             onClick={() => setChain(c)}
-            className={"min-h-9 rounded-full border px-3 text-sm " + (chain === c ? "border-brass text-fg" : "border-line text-muted")}
+            className={"min-h-9 rounded-full border px-3 text-sm " + (chain === c ? "border-primary text-fg" : "border-line text-muted")}
           >
             {MARKET_CHAIN_LABEL[c]}
           </button>
@@ -816,22 +1073,35 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
             <button
               type="button"
               onClick={() => selectBoard("all")}
-              className={"min-h-9 rounded-full border px-3 text-sm " + (board === "all" ? "border-brass text-fg" : "border-line text-muted")}
+              className={"min-h-9 rounded-full border px-3 text-sm " + (board === "all" ? "border-primary text-fg" : "border-line text-muted")}
             >
               全市场
             </button>
             <button
               type="button"
               onClick={() => selectBoard("streak")}
-              className={"min-h-9 rounded-full border px-3 text-sm " + (board === "streak" ? "border-brass text-fg" : "border-line text-muted")}
+              className={"min-h-9 rounded-full border px-3 text-sm " + (board === "streak" ? "border-primary text-fg" : "border-line text-muted")}
             >
               连涨榜
             </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          data-testid="access-filter"
+          aria-pressed={accessOnly}
+          onClick={() => setAccessOnly((value) => !value)}
+          className={"min-h-9 rounded-full border px-3 text-sm " + (accessOnly ? "border-primary bg-primary/10 text-fg" : "border-line text-muted")}
+        >
+          状态
+        </button>
+        {!watchProp ? (
+          <>
             <button
               type="button"
               data-testid="watch-tab"
               onClick={() => selectBoard("watch")}
-              className={"min-h-9 rounded-full border px-3 text-sm " + (board === "watch" ? "border-brass text-fg" : "border-line text-muted")}
+              className={"min-h-9 rounded-full border px-3 text-sm " + (board === "watch" ? "border-primary text-fg" : "border-line text-muted")}
             >
               ★ 自选 <span className="font-mono">{watch.length}</span>
             </button>
@@ -841,16 +1111,16 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
           <button
             type="button"
             onClick={() => setSortKey("added")}
-            className={"min-h-9 rounded-full border px-3 text-sm " + (sortKey === "added" ? "border-brass text-fg" : "border-line text-muted")}
+            className={"min-h-9 rounded-full border px-3 text-sm " + (sortKey === "added" ? "border-primary text-fg" : "border-line text-muted")}
           >
             加入顺序
           </button>
         ) : null}
         {!watchOnly && inclusionStats ? (
-          <p className="ml-auto whitespace-nowrap font-mono text-xs text-muted">
+          <p className="ml-auto max-w-full overflow-x-auto whitespace-nowrap font-mono text-xs text-muted">
             总收录 <span className="text-fg">{inclusionStats.totalTokens.toLocaleString()}</span>
             <span className="mx-2 text-line">·</span>
-            今日新增 <span className="text-moss">+{inclusionStats.todayNewTokens.toLocaleString()}</span>
+            今日新增 <span className="text-positive">+{inclusionStats.todayNewTokens.toLocaleString()}</span>
             {tierStats ? (
               <>
                 <span className="mx-2 text-line">·</span>
@@ -859,13 +1129,19 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
                 </span>
                 <span className="mx-2 text-line">·</span>
                 <a href="#sec-early" title="EARLY：$20k ≤ 当前流动性 < $50k，早期观察，不进正式榜" className="hover:text-fg">
-                  EARLY <span className="text-brass">{tierStats.earlyTokens.toLocaleString()}</span>
+                  EARLY <span className="text-primary">{tierStats.earlyTokens.toLocaleString()}</span>
                 </a>
               </>
             ) : null}
           </p>
         ) : null}
-        <div className={watchOnly || !inclusionStats ? "ml-auto" : ""}>
+        <div className={`flex items-center gap-2 ${watchOnly || !inclusionStats ? "ml-auto" : ""}`}>
+          <HiddenTokensMenu
+            keys={hiddenKeys}
+            tokens={marketData ?? []}
+            onRestore={restoreHidden}
+            onRestoreAll={() => persistHidden([])}
+          />
           <button
             type="button"
             onClick={() => load()}
@@ -878,8 +1154,29 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
         </div>
       </div>
 
+      {accessOnly ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="access-categories">
+          {ACCESS_CATEGORY_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              data-access-category={option.value}
+              aria-pressed={accessCategory === option.value}
+              onClick={() => setAccessCategory(option.value)}
+              className={"min-h-9 rounded-full border px-3 font-mono text-xs " + (accessCategory === option.value ? "border-primary bg-primary/10 text-fg" : "border-line text-muted")}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="mb-4 flex min-h-9 flex-wrap items-center gap-2">
-        <span className="font-mono text-xs text-muted">点日期列循环 ↑ / ↓ / 不筛，多个日期同时满足（AND）。向左滚动看更早日期，最多 {dailyDates.length} 天。</span>
+        <span className="font-mono text-xs text-muted">
+          {latestFinalizedDate
+            ? `最近 ${dailyDates.length} 个统一 finalized 自然日（截至 ${dateLabel(latestFinalizedDate)}）。点日期列循环 ↑ / ↓ / 不筛，多个日期同时满足（AND）。`
+            : "等待 API 提供全市场统一 latest finalized date。"}
+        </span>
         {dailyFilterDates.length > 0 ? (
           <button
             type="button"
@@ -887,7 +1184,7 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
               setDailyFilters({});
               setPrimarySort(null);
             }}
-            className="inline-flex h-9 items-center gap-1 rounded-full border border-brass px-3 text-xs text-fg hover:bg-brass/10"
+            className="inline-flex h-9 items-center gap-1 rounded-full border border-primary px-3 text-xs text-fg hover:bg-primary/10"
           >
             <X className="size-3" />
             清除全部日期筛选（{dailyFilterDates.length}）
@@ -901,57 +1198,102 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
           >
             {loading ? "计算中…" : board === "streak"
               ? `正式连涨榜 ${shown.length} 个`
-              : `${days}D窗口${ndWindowEnd ? `（截至 ${ndWindowEnd.slice(5).replace("-", "/")}）` : ""} · ${completeNdCount} 个具备完整数据`}
+              : `${days}D窗口${latestFinalizedDate ? `（截至 ${dateLabel(latestFinalizedDate)}）` : ""} · ${completeNdCount} 个具备完整数据`}
           </span>
         )}
       </div>
 
       <div className="mb-4">
-        <h3 className="mb-2 font-mono text-xs text-muted">实时异动 · 不含 STALE</h3>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-mono text-xs text-muted">实时异动</h3>
+          <div className="inline-flex rounded-full border border-line p-0.5" aria-label="实时异动显示模式">
+            <button
+              type="button"
+              aria-pressed={activityMode === "price"}
+              onClick={() => setActivityMode("price")}
+              className={"min-h-8 rounded-full px-3 font-mono text-xs " + (activityMode === "price" ? "bg-surface-2 text-fg" : "text-muted")}
+            >
+              价格异动
+            </button>
+            <button
+              type="button"
+              aria-pressed={activityMode === "access"}
+              onClick={() => setActivityMode("access")}
+              className={"min-h-8 rounded-full px-3 font-mono text-xs " + (activityMode === "access" ? "bg-surface-2 text-fg" : "text-muted")}
+            >
+              最新状态
+            </button>
+          </div>
+        </div>
         <div className="flex gap-2 overflow-x-auto">
-          {movers.map((t) => (
-            <div key={keyOf(t)} className="min-w-36 rounded-lg border border-line px-3 py-2">
-              <p className="truncate text-sm">{t.symbol || "?"}</p>
-              <p className={`font-mono text-xs ${pctColor(Number(t.pc24h))}`}>{fmtPct(Number(t.pc24h))}</p>
-            </div>
-          ))}
-          {movers.length === 0 && <p className="text-xs text-muted">没有仍在周期内的行情</p>}
+          {activityMode === "price" ? (
+            <>
+              {movers.map((t) => (
+                <div key={keyOf(t)} className="min-w-36 rounded-lg border border-line px-3 py-2">
+                  <p className="truncate text-sm">{t.symbol || "?"}</p>
+                  <p className={`font-mono text-xs ${pctColor(Number(t.pc24h))}`}>{fmtPct(Number(t.pc24h))}</p>
+                </div>
+              ))}
+              {movers.length === 0 && <p className="text-xs text-muted">没有仍在周期内的行情</p>}
+            </>
+          ) : (
+            <>
+              {accessUpdates.map(({ token, event }) => (
+                <button
+                  key={`${keyOf(token)}:${event.id}`}
+                  type="button"
+                  onClick={() => openAccessDetail(token)}
+                  className="min-w-40 rounded-lg border border-line px-3 py-2 text-left hover:bg-surface"
+                >
+                  <span className="block truncate text-sm text-fg">{token.symbol || "?"}</span>
+                  <span className="mt-0.5 block truncate font-mono text-xs text-muted">
+                    {marketAccessLabel(event.kind)}
+                    {isSurpriseAccessEvent(event) ? " · Surprise" : null}
+                    {isScheduledAccessEvent(event) ? " · Scheduled" : null}
+                  </span>
+                  <span className="mt-1 block font-mono text-[10px] text-muted">{fmtAccessAge(event.detectedAt, now)}</span>
+                </button>
+              ))}
+              {accessUpdates.length === 0 && <p className="text-xs text-muted">没有已记录的市场准入状态</p>}
+            </>
+          )}
         </div>
       </div>
 
-      {error && <p className="mb-3 rounded-lg border border-clay/30 bg-clay/10 p-3 text-sm text-clay">{error}</p>}
+      {error && <p className="mb-3 rounded-lg border border-negative/30 bg-negative/10 p-3 text-sm text-negative">{error}</p>}
 
       <div ref={scrollRef} className="market-table-scroll overflow-x-auto rounded-xl border border-line" data-testid="market-scroll">
-        <table className="market-table w-full text-left text-sm" data-days={days} data-applied-days={appliedDays ?? ""} data-sort={primarySort ? `daily:${primarySort.date}:${primarySort.dir}` : String(sortKey)}>
+        <table className="market-table w-full text-left text-sm" data-days={days} data-applied-days={appliedDays ?? ""} data-window-end={latestFinalizedDate ?? ""} data-api-rows={marketData?.length ?? 0} data-qualified-rows={tableRows.length} data-sort={primarySort ? `daily:${primarySort.date}:${primarySort.dir}` : String(sortKey)}>
           <thead>
             <tr className="border-b border-line bg-surface-2 text-xs text-muted">
               <th className="market-star-sticky text-center font-mono" title="自选">★</th>
+              <th className="market-hide-sticky text-center font-mono" title="隐藏">×</th>
               <th className="market-token-sticky font-mono">Token</th>
               <Th k="price" label="Price" className="market-price-col" />
               <th className="market-age-col font-mono text-right">Age</th>
               <Th k="marketCap" label="FDV / MC" title="上行 FDV：GMGN market_cap = price × total_supply。下行 MC：流通市值，库里没有独立字段时显示 —，不拿 FDV 顶替。按 FDV 排序。" className="market-fdv-col" />
               {dailyDates.map((date) => {
                 const direction = dailyFilters[date];
-                const isToday = date === todayDate;
+                const isLatestFinalized = date === latestFinalizedDate;
                 const isPrimary = primarySort?.date === date;
-                const tLabel = fmtTOffset(dateTOffset(date, todayDate));
+                const tLabel = fmtTOffset(dateTOffset(date, latestFinalizedDate!));
                 return (
                   <th
                     key={date}
                     className="market-date-col text-center font-mono text-xs whitespace-nowrap"
                     data-daily-date={date}
-                    data-today={isToday ? "true" : undefined}
+                    data-latest-finalized={isLatestFinalized ? "true" : undefined}
                     data-t-offset={tLabel}
                     data-primary-sort={isPrimary ? primarySort.dir : undefined}
                   >
                     <button
                       type="button"
                       onClick={() => clickDailyDate(date)}
-                      title={`${date} · ${tLabel}${isToday ? "（今天）" : ""}：点击循环 NONE → UP → DOWN。最后点击的日期决定排序（↑ 从大到小，↓ 从小到大），其他已选日期只筛选`}
+                      title={`${date} · ${tLabel}${isLatestFinalized ? "（最近 finalized）" : ""}：点击循环 NONE → UP → DOWN。最后点击的日期决定排序（↑ 从大到小，↓ 从小到大），其他已选日期只筛选`}
                       aria-label={`${date} 日收益筛选，当前 ${direction ?? "NONE"}`}
                       aria-pressed={direction != null}
                       data-daily-filter={direction ?? ""}
-                      className={`inline-flex h-9 w-full flex-col items-center justify-center rounded-md px-1 leading-tight hover:bg-surface ${isPrimary ? "underline decoration-brass underline-offset-2" : ""} ${direction === "UP" ? "text-moss" : direction === "DOWN" ? "text-clay" : "text-muted hover:text-fg"}`}
+                      className={`inline-flex h-9 w-full flex-col items-center justify-center rounded-md px-1 leading-tight hover:bg-surface ${isPrimary ? "underline decoration-primary underline-offset-2" : ""} ${direction === "UP" ? "text-positive" : direction === "DOWN" ? "text-negative" : "text-muted hover:text-fg"}`}
                     >
                       <span>
                         {dateLabel(date)}
@@ -965,7 +1307,7 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
             </tr>
           </thead>
           <tbody>
-            {tableRows.slice(0, limit).map((row) => {
+            {tableRows.map((row) => {
               if (row.kind === "gone") {
                 const item = row.item;
                 return (
@@ -973,11 +1315,14 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
                     <td className="market-star-sticky text-center">
                       <StarButton on onClick={() => onStar(item)} />
                     </td>
+                    <td className="market-hide-sticky text-center">
+                      <HideTokenButton symbol={item.symbol} onClick={() => hideToken(item)} />
+                    </td>
                     <td className="market-token-sticky">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{item.symbol || "?"} <span className="font-mono text-[10px] text-muted">{item.chain}</span></p>
                         <CopyAddress address={item.address} />
-                        <p className="font-mono text-[10px] text-clay">不在当前榜</p>
+                        <p className="font-mono text-[10px] text-negative">不在当前榜</p>
                       </div>
                     </td>
                     <td className="market-price-col text-right font-mono text-xs">—</td>
@@ -991,9 +1336,10 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
                         key={date}
                         className="market-date-col text-right font-mono text-xs text-muted"
                         data-daily-date={date}
-                        data-today={date === todayDate ? "true" : undefined}
+                        data-latest-finalized={date === latestFinalizedDate ? "true" : undefined}
                       >
-                        —
+                        <div>—</div>
+                        <div className="market-daily-volume">—</div>
                       </td>
                     ))}
                   </tr>
@@ -1018,42 +1364,49 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
                   <td className="market-star-sticky text-center">
                     <StarButton on={isWatched(t)} onClick={() => onStar(t)} />
                   </td>
+                  <td className="market-hide-sticky text-center">
+                    <HideTokenButton symbol={t.symbol} onClick={() => hideToken(t)} />
+                  </td>
                   <td className="market-token-sticky">
                     <TokenCell
                       t={t}
                       now={now}
                       showAnchor={!watchOnly && board === "streak"}
-                      onOpen={() => setDetail({ chain: t.chain, address: t.address })}
+                      onOpen={() => openTokenDetail(t)}
+                      onOpenAccess={() => openAccessDetail(t)}
                     />
-                    {tag && <span className="ml-10 font-mono text-[10px] text-clay">{tag}</span>}
-                    {t.diverge === 1 && <span className="ml-1 font-mono text-[10px] text-brass">DIVERGE</span>}
+                    {tag && <span className="ml-10 font-mono text-[10px] text-negative">{tag}</span>}
+                    {t.diverge === 1 && <span className="ml-1 font-mono text-[10px] text-primary">DIVERGE</span>}
                   </td>
                   <FlashCell value={t.price} armed={t.commitOk && t.chgPrice} className="market-price-col text-right font-mono text-xs">
                     <span title={quoteTitle}>
-                      <FieldStale show={t.stale} title={quoteTitle} />
                       ${fmtPrice(t.price)}
                     </span>
                   </FlashCell>
                   <td className="market-age-col text-right font-mono text-xs">{fmtAge(t.ageSec)}</td>
                   <td className="market-fdv-col text-right font-mono text-xs" title={marketCapTitle}>
                     <div data-fdv>
-                      <FieldStale show={t.marketCapAgeSec == null || t.marketCapAgeSec > 2 * GMGN_PRICE_PERIOD} title={marketCapTitle} />
                       {fmtUsd(t.marketCap)}
                     </div>
                     <div data-mc className="text-muted" title="流通市值（MC）：市场库没有单独的流通市值 / 流通量字段，不拿 FDV 顶替">—</div>
                   </td>
                   {dailyDates.map((date) => {
-                    const dailyReturn = t.dailyReturns?.[date] ?? null;
+                    // 收益和成交量取自同一个 (chain, address, date) 对象，不分别查表。
+                    const day = t.dailyHistory?.find((entry) => entry.date === date);
+                    const dailyReturn = day?.returnPct ?? null;
+                    const volumeUsd = day?.volumeUsd ?? null;
                     return (
                       <td
                         key={date}
                         className={`market-date-col text-right font-mono text-xs ${pctColor(dailyReturn)}`}
-                        title={`${date} FINALIZED UTC 日K收益`}
+                        title={`${date} FINALIZED UTC 日K：收益 ${formatDailyReturn(dailyReturn)} · 成交量 ${volumeUsd == null ? "—（无可信数据）" : `$${Math.round(volumeUsd).toLocaleString("en-US")}`}`}
                         data-daily-date={date}
                         data-daily-return={dailyReturn == null ? "" : String(dailyReturn)}
-                        data-today={date === todayDate ? "true" : undefined}
+                        data-daily-volume={volumeUsd == null ? "" : String(volumeUsd)}
+                        data-latest-finalized={date === latestFinalizedDate ? "true" : undefined}
                       >
-                        {formatDailyReturn(dailyReturn)}
+                        <div>{formatDailyReturn(dailyReturn)}</div>
+                        <div className="market-daily-volume">{formatCompactUsd(volumeUsd)}</div>
                       </td>
                     );
                   })}
@@ -1062,35 +1415,44 @@ export function MarketView({ watchOnly: watchProp = false }: { watchOnly?: boole
             })}
           </tbody>
         </table>
-        {tableRows.length > limit && (
-          <button
-            type="button"
-            onClick={() => setLimit((n) => n + PAGE_ROWS * 2)}
-            className="block w-full border-t border-line py-3 text-center text-sm text-muted hover:bg-surface/40 hover:text-fg"
-          >
-            显示更多（已显示 {limit} / {tableRows.length}）
-          </button>
-        )}
         {tableRows.length === 0 && !loading && !error && (
           <p className="p-8 text-center text-muted">
-            {watchOnly
+            {accessOnly
+              ? "当前筛选没有已记录的市场准入状态"
+              : watchOnly
               ? (watch.length === 0 ? "还没有自选。在全市场或连涨榜点代币前面的 ☆。" : "没有匹配的自选")
               : board === "streak"
                 ? "正式连涨榜没有流动性不低于 $50,000 且年龄不超过 300 秒的代币"
                 : data && data.length > 0
-                  ? `没有具备完整 ${days}D 涨跌数据的代币`
+                  ? "没有匹配当前条件的代币"
                   : "没有数据，先跑采集器"}
           </p>
         )}
       </div>
       {detail ? <TokenDetailDrawer chain={detail.chain} address={detail.address} onClose={() => setDetail(null)} /> : null}
+      {accessDetail ? <MarketAccessDrawer detail={accessDetail} onClose={() => setAccessDetail(null)} /> : null}
       <p className="mt-3 text-xs text-muted">
         {watchOnly
           ? "自选存在这台浏览器。点星标加入或移出。名单不看 $50,000 流动性门槛。掉出当前榜的代币留在这里，并标成不在当前榜。默认按加入顺序。"
           : null}
         {watchOnly ? " " : null}
-        {`24H：当前价格相对 24 小时前的滚动涨跌幅，新鲜度跟报价走。日K / 连续上涨 / N日累计只用 FINALIZED 日K（日历已收盘且 fetched_at >= bar.end）。PROVISIONAL 日K保留在库里，不进正式指标。连续上涨与顶部 N 日窗口独立。${days}D累计需要 ${days + 1} 根连续 finalized 日K。stale 只表示今天 UTC 0 点后还没重拉，不等于未定稿。LOW_BASE / EXTREME_RETURN 是质量标签，不改 raw 收益。正式连涨榜要求流动性不低于 $50,000，且流动性年龄不超过 300 秒。回撤超过 40% 只标红，不取消连续上涨。身份是 chain + CA，同名代币靠 CA 区分。Age 是价格源年龄，不是日 K 年龄。`}
+        {`24H：当前价格相对 24 小时前的滚动涨跌幅，新鲜度跟报价走。日K / 连续上涨 / N日累计只用 FINALIZED 日K（日历已收盘且 fetched_at >= bar.end）。PROVISIONAL 日K保留在库里，不进正式指标。连续上涨与顶部 N 日窗口独立。${days}D累计需要 ${days + 1} 根连续 finalized 日K。LOW_BASE / EXTREME_RETURN 是质量标签，不改 raw 收益。正式连涨榜要求流动性不低于 $50,000，且流动性年龄不超过 300 秒。回撤超过 40% 只标红，不取消连续上涨。身份是 chain + CA，同名代币靠 CA 区分。Age 是价格源年龄，不是日 K 年龄。`}
       </p>
     </div>
   );
+}
+
+/** Unified paging is the default. The legacy full-registry query is opt-in so
+ * its synchronous historical scan cannot stall the unified local-data panel. */
+export function MarketView({watchOnly=false}:{watchOnly?:boolean}) {
+  const [showLegacy,setShowLegacy]=useState(false);
+  return <div className="mx-auto max-w-[1400px] px-4 py-6">
+    <WmUnifiedMarket watchOnly={watchOnly} />
+    <MarketHealthBar />
+    <WmQualityBar />
+    <button className="min-h-11 rounded-lg border border-line bg-surface px-4 text-sm text-muted" aria-expanded={showLegacy} onClick={()=>setShowLegacy(!showLegacy)}>
+      {showLegacy?'收起':'展开'}链上观察与原有筛选
+    </button>
+    {showLegacy&&<LegacyMarketView watchOnly={watchOnly}/>}
+  </div>;
 }

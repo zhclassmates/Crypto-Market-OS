@@ -9,7 +9,7 @@
  *
  *   node scripts/preview.mjs stop|restart
  */
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -169,6 +169,7 @@ function isAlive(pid) {
 
 function pgidOf(pid) {
   try {
+    if (process.platform === 'darwin') return Number(execFileSync('ps',['-p',String(pid),'-o','pgid='],{encoding:'utf8'}).trim()) || null;
     return parsePgid(readFileSync(`/proc/${pid}/stat`, "utf8"));
   } catch {
     return null;
@@ -196,6 +197,7 @@ function killPid(pid, signal) {
 
 function cmdlineOf(pid) {
   try {
+    if (process.platform === 'darwin') return execFileSync('ps',['-p',String(pid),'-o','command='],{encoding:'utf8'});
     return readFileSync(`/proc/${pid}/cmdline`, "utf8");
   } catch {
     // Usually a dead pid — the stale pidfile this corroboration exists for.
@@ -243,6 +245,15 @@ function pidsForSocketInodes(inodes) {
  * whose owning pid could not be resolved (an fd dir we may not read).
  */
 function portOwners() {
+  if (process.platform === 'darwin') {
+    try {
+      const pids = execFileSync('lsof',['-t','-nP',`-iTCP:${PREVIEW_PORT}`,'-sTCP:LISTEN'],{encoding:'utf8'}).trim().split(/\s+/).map(Number).filter(n=>n>1);
+      return {pids,unattributed:false};
+    } catch (e) {
+      if(e.status===1)return {pids:[],unattributed:false};
+      throw e;
+    }
+  }
   const inodes = new Set();
   for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
     let dump;
@@ -335,7 +346,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.error(`[preview] ${args.error}`);
     process.exit(1);
   }
-  if (!existsSync("/proc/self")) {
+  if (!existsSync("/proc/self") && process.platform !== "darwin") {
     console.error("[preview] no /proc — this script only runs inside the sandbox");
     process.exit(1);
   }

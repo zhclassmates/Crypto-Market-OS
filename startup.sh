@@ -5,6 +5,22 @@ if [ -d /workspace ]; then
 else
   cd "$(dirname "$0")" || exit 1
 fi
+# The existing collector's local observations feed the unified view every 5 min.
+# A lifetime file lock in the worker makes repeated startup calls harmless.
+python3 - <<'PYWORKER'
+import subprocess
+from pathlib import Path
+root=Path.cwd();script=root/'scripts/unified-market-refresh.py'
+collector=root/'rh_v2/market_run.py'
+if collector.exists():
+ state=root/'.grok';state.mkdir(exist_ok=True)
+ with (state/'market-revive.log').open('ab') as log:
+  subprocess.Popen(['python3',str(collector),'loop'],cwd=root,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
+if script.exists():
+ state=root/'.grok';state.mkdir(exist_ok=True)
+ with (state/'unified-refresh.log').open('ab') as log:
+  subprocess.Popen(['python3',str(script),'--loop'],cwd=root,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
+PYWORKER
 if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:8080/; then
   exit 0
 fi

@@ -1,4 +1,4 @@
-/** 自选只存在这台浏览器。身份是 chain + address（address 小写比较），不能只看 address：跨链会撞。 */
+/** 自选只存在这台浏览器。身份是 chain + address（EVM address 小写比较，Solana 大小写敏感），不能只看 address：跨链会撞。 */
 
 export const WATCH_STORAGE_KEY = "market_watchlist_v1";
 /** 旧版键；新键还没写过时读一次迁过来。 */
@@ -14,7 +14,7 @@ export interface WatchItem {
 }
 
 export function watchKey(chain: string, address: string): string {
-  return `${chain}:${address.toLowerCase()}`;
+  return `${chain}:${chain === "sol" || chain === "solana" ? address : address.toLowerCase()}`;
 }
 
 export function parseWatchlist(raw: string | null): WatchItem[] {
